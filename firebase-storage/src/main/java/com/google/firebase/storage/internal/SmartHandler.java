@@ -14,8 +14,7 @@
 
 package com.google.firebase.storage.internal;
 
-import android.os.Handler;
-import android.os.Looper;
+import android.annotation.SuppressLint;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import com.google.android.gms.common.internal.Preconditions;
@@ -29,7 +28,6 @@ import java.util.concurrent.Executor;
  */
 @SuppressWarnings("JavaDoc")
 public class SmartHandler {
-  private final Handler handler;
   private final Executor executor;
   /**
    * This works around a deadlock in robolectric (see https://github
@@ -43,16 +41,17 @@ public class SmartHandler {
   /*package*/ static boolean testMode = false;
 
   /** Constructs a SmartHandler */
+  // TODO(b/258426744): Migrate to go/firebase-android-executors
+  @SuppressLint("ThreadPoolCreation")
   public SmartHandler(@Nullable Executor executor) {
-    this.executor = executor;
-    if (this.executor == null) {
+    if (executor == null) {
       if (!testMode) {
-        handler = new Handler(Looper.getMainLooper());
+        this.executor = StorageTaskScheduler.getInstance().getMainThreadExecutor();
       } else {
-        handler = null; // we will call back on the thread pool.
+        this.executor = null;
       }
     } else {
-      handler = null;
+      this.executor = executor;
     }
   }
 
@@ -64,15 +63,11 @@ public class SmartHandler {
    */
   public void callBack(@NonNull final Runnable runnable) {
     Preconditions.checkNotNull(runnable);
-    if (handler == null) {
-      if (executor != null) {
-        // manually specified executor
-        executor.execute(runnable);
-      } else {
-        StorageTaskScheduler.getInstance().scheduleCallback(runnable);
-      }
+    if (executor != null) {
+      // manually specified executor
+      executor.execute(runnable);
     } else {
-      handler.post(runnable);
+      StorageTaskScheduler.getInstance().scheduleCallback(runnable);
     }
   }
 }

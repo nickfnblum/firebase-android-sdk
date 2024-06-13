@@ -15,12 +15,16 @@
 package com.google.firebase.appdistribution.impl;
 
 import static com.google.common.truth.Truth.assertThat;
+import static com.google.firebase.appdistribution.impl.TestUtils.getTestFileInputStream;
 import static com.google.firebase.appdistribution.impl.TestUtils.readTestFile;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertThrows;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.robolectric.Shadows.shadowOf;
 
+import android.content.ContentResolver;
+import android.net.Uri;
 import androidx.test.core.app.ApplicationProvider;
 import com.google.common.collect.Iterators;
 import com.google.firebase.FirebaseApp;
@@ -29,8 +33,6 @@ import com.google.firebase.appdistribution.FirebaseAppDistributionException;
 import com.google.firebase.appdistribution.FirebaseAppDistributionException.Status;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import javax.net.ssl.HttpsURLConnection;
@@ -41,13 +43,14 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
+import org.robolectric.shadows.ShadowContentResolver;
 
 @RunWith(RobolectricTestRunner.class)
 public class TesterApiHttpClientTest {
 
   private static final String TEST_API_KEY = "AIzaSyabcdefghijklmnopqrstuvwxyz1234567";
   private static final String TEST_APP_ID_1 = "1:123456789:android:abcdef";
-  private static final String TEST_PROJECT_ID = "777777777777";
+  private static final String TEST_PROJECT_ID = "project-id";
   private static final String TEST_AUTH_TOKEN = "fad.auth.token";
   private static final String INVALID_RESPONSE = "InvalidResponse";
   private static final String TEST_PATH = "some/url/path";
@@ -76,7 +79,11 @@ public class TesterApiHttpClientTest {
 
     when(mockHttpsURLConnectionFactory.openConnection(TEST_URL)).thenReturn(mockHttpsURLConnection);
 
-    testerApiHttpClient = new TesterApiHttpClient(firebaseApp, mockHttpsURLConnectionFactory);
+    testerApiHttpClient =
+        new TesterApiHttpClient(
+            firebaseApp.getApplicationContext(),
+            firebaseApp.getOptions(),
+            mockHttpsURLConnectionFactory);
   }
 
   @Test
@@ -158,6 +165,27 @@ public class TesterApiHttpClientTest {
   }
 
   @Test
+  public void makeGetRequest_whenResponseFailsWithApiDisabled_throwsError() throws Exception {
+    InputStream response = getTestFileInputStream("apiDisabledResponse.json");
+    when(mockHttpsURLConnection.getErrorStream()).thenReturn(response);
+    when(mockHttpsURLConnection.getResponseCode()).thenReturn(403);
+
+    FirebaseAppDistributionException e =
+        assertThrows(
+            FirebaseAppDistributionException.class,
+            () -> testerApiHttpClient.makeGetRequest(TAG, TEST_PATH, TEST_AUTH_TOKEN));
+
+    assertThat(e.getErrorCode()).isEqualTo(Status.API_DISABLED);
+    assertThat(e.getMessage()).contains(TAG);
+    assertThat(e.getMessage()).contains(ErrorMessages.API_DISABLED);
+    assertThat(e.getMessage()).contains("Google developers console API activation");
+    assertThat(e.getMessage())
+        .contains(
+            "https://console.developers.google.com/apis/api/firebaseapptesters.googleapis.com/overview?project=123456789");
+    verify(mockHttpsURLConnection).disconnect();
+  }
+
+  @Test
   public void makeGetRequest_whenResponseFailsWith404_throwsError() throws Exception {
     when(mockHttpsURLConnection.getResponseCode()).thenReturn(404);
     when(mockHttpsURLConnection.getInputStream()).thenThrow(new IOException("error"));
@@ -198,7 +226,7 @@ public class TesterApiHttpClientTest {
     ByteArrayOutputStream requestBodyOutputStream = new ByteArrayOutputStream();
     when(mockHttpsURLConnection.getOutputStream()).thenReturn(requestBodyOutputStream);
 
-    testerApiHttpClient.makePostRequest(TAG, TEST_PATH, TEST_AUTH_TOKEN, TEST_POST_BODY);
+    testerApiHttpClient.makeJsonPostRequest(TAG, TEST_PATH, TEST_AUTH_TOKEN, TEST_POST_BODY);
 
     assertThat(new String(requestBodyOutputStream.toByteArray(), UTF_8)).isEqualTo(TEST_POST_BODY);
     verify(mockHttpsURLConnection).setDoOutput(true);
@@ -216,7 +244,7 @@ public class TesterApiHttpClientTest {
         assertThrows(
             FirebaseAppDistributionException.class,
             () ->
-                testerApiHttpClient.makePostRequest(
+                testerApiHttpClient.makeJsonPostRequest(
                     TAG, TEST_PATH, TEST_AUTH_TOKEN, TEST_POST_BODY));
 
     assertThat(e.getErrorCode()).isEqualTo(Status.NETWORK_FAILURE);
@@ -227,26 +255,32 @@ public class TesterApiHttpClientTest {
   @Test
   public void makeUploadRequest_writesRequestBodyAndSetsCorrectHeaders() throws Exception {
     String responseJson = readTestFile("testSimpleResponse.json");
-    InputStream responseInputStream = new ByteArrayInputStream(responseJson.getBytes(UTF_8));
-    when(mockHttpsURLConnection.getResponseCode()).thenReturn(200);
-    when(mockHttpsURLConnection.getInputStream()).thenReturn(responseInputStream);
-    ByteArrayOutputStream requestBodyOutputStream = new ByteArrayOutputStream();
-    when(mockHttpsURLConnection.getOutputStream()).thenReturn(requestBodyOutputStream);
-    File testRequestBodyFile =
-        ApplicationProvider.getApplicationContext().getFileStreamPath("requestBody.txt");
-    try (FileWriter writer = new FileWriter(testRequestBodyFile)) {
-      writer.write("Test post body");
+
+    try (InputStream postBodyInputStream =
+            new ByteArrayInputStream("Test post body".getBytes(UTF_8));
+        ByteArrayOutputStream requestBodyOutputStream = new ByteArrayOutputStream();
+        InputStream responseInputStream = new ByteArrayInputStream(responseJson.getBytes(UTF_8))) {
+      when(mockHttpsURLConnection.getResponseCode()).thenReturn(200);
+      when(mockHttpsURLConnection.getInputStream()).thenReturn(responseInputStream);
+      when(mockHttpsURLConnection.getOutputStream()).thenReturn(requestBodyOutputStream);
+
+      ContentResolver contentResolver =
+          ApplicationProvider.getApplicationContext().getContentResolver();
+      ShadowContentResolver shadowContentResolver = shadowOf(contentResolver);
+      Uri uri = Uri.parse("file:///path/to/data");
+      shadowContentResolver.registerInputStream(uri, postBodyInputStream);
+
+      testerApiHttpClient.makeUploadRequest(
+          TAG, TEST_PATH, TEST_AUTH_TOKEN, "test.jpeg", "image/jpeg", uri);
+
+      assertThat(new String(requestBodyOutputStream.toByteArray(), UTF_8))
+          .isEqualTo("Test post body");
+      verify(mockHttpsURLConnection).setDoOutput(true);
+      verify(mockHttpsURLConnection).setRequestMethod("POST");
+      verify(mockHttpsURLConnection).addRequestProperty("Content-Type", "image/jpeg");
+      verify(mockHttpsURLConnection).addRequestProperty("X-Goog-Upload-Protocol", "raw");
+      verify(mockHttpsURLConnection).addRequestProperty("X-Goog-Upload-File-Name", "test.jpeg");
+      verify(mockHttpsURLConnection).disconnect();
     }
-
-    testerApiHttpClient.makeUploadRequest(TAG, TEST_PATH, TEST_AUTH_TOKEN, testRequestBodyFile);
-
-    assertThat(new String(requestBodyOutputStream.toByteArray(), UTF_8))
-        .isEqualTo("Test post body");
-    verify(mockHttpsURLConnection).setDoOutput(true);
-    verify(mockHttpsURLConnection).setRequestMethod("POST");
-    verify(mockHttpsURLConnection).addRequestProperty("Content-Type", "application/json");
-    verify(mockHttpsURLConnection).addRequestProperty("X-Goog-Upload-Protocol", "raw");
-    verify(mockHttpsURLConnection).addRequestProperty("X-Goog-Upload-File-Name", "screenshot.png");
-    verify(mockHttpsURLConnection).disconnect();
   }
 }

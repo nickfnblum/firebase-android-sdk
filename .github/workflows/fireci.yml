@@ -15,11 +15,13 @@ jobs:
     name: "fireci tests"
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v3.0.2
+      - uses: actions/checkout@v4.1.1
       - uses: actions/setup-python@v2
         with:
-          python-version: '3.9'
+          python-version: '3.8'
       - run: |
           pip install -e "ci/fireci[test]"
       - run: |
           pytest ci/fireci
+      - run: |
+          mypy --config-file ci/fireci/setup.cfg ci/fireci/ 

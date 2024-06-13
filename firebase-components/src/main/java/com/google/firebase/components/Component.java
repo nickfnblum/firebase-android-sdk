@@ -15,6 +15,9 @@
 package com.google.firebase.components;
 
 import androidx.annotation.IntDef;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.Arrays;
@@ -76,7 +79,8 @@ public final class Component<T> {
     int SET = 1;
   }
 
-  private final Set<Class<? super T>> providedInterfaces;
+  private final String name;
+  private final Set<Qualified<? super T>> providedInterfaces;
   private final Set<Dependency> dependencies;
   private final @Instantiation int instantiation;
   private final @ComponentType int type;
@@ -84,12 +88,14 @@ public final class Component<T> {
   private final Set<Class<?>> publishedEvents;
 
   private Component(
-      Set<Class<? super T>> providedInterfaces,
+      @Nullable String name,
+      Set<Qualified<? super T>> providedInterfaces,
       Set<Dependency> dependencies,
       @Instantiation int instantiation,
       @ComponentType int type,
       ComponentFactory<T> factory,
       Set<Class<?>> publishedEvents) {
+    this.name = name;
     this.providedInterfaces = Collections.unmodifiableSet(providedInterfaces);
     this.dependencies = Collections.unmodifiableSet(dependencies);
     this.instantiation = instantiation;
@@ -99,11 +105,21 @@ public final class Component<T> {
   }
 
   /**
+   * Optional name of the component.
+   *
+   * <p>Used for debug purposes only.
+   */
+  @Nullable
+  public String getName() {
+    return name;
+  }
+
+  /**
    * Returns all interfaces this component provides.
    *
    * <p>Note: T conforms to all of these interfaces.
    */
-  public Set<Class<? super T>> getProvidedInterfaces() {
+  public Set<Qualified<? super T>> getProvidedInterfaces() {
     return providedInterfaces;
   }
 
@@ -153,6 +169,12 @@ public final class Component<T> {
     return type == ComponentType.VALUE;
   }
 
+  /** Creates a copy of the component with {@link ComponentFactory} replaced. */
+  public Component<T> withFactory(ComponentFactory<T> factory) {
+    return new Component<>(
+        name, providedInterfaces, dependencies, instantiation, type, factory, publishedEvents);
+  }
+
   @Override
   public String toString() {
     StringBuilder sb =
@@ -180,6 +202,18 @@ public final class Component<T> {
     return new Builder<>(anInterface, additionalInterfaces);
   }
 
+  /** Returns a Component<T> builder. */
+  public static <T> Component.Builder<T> builder(Qualified<T> anInterface) {
+    return new Builder<>(anInterface);
+  }
+
+  /** Returns a Component<T> builder. */
+  @SafeVarargs
+  public static <T> Component.Builder<T> builder(
+      Qualified<T> anInterface, Qualified<? super T>... additionalInterfaces) {
+    return new Builder<>(anInterface, additionalInterfaces);
+  }
+
   /**
    * Wraps a value in a {@link Component} with no dependencies.
    *
@@ -197,6 +231,13 @@ public final class Component<T> {
     return builder(anInterface, additionalInterfaces).factory((args) -> value).build();
   }
 
+  /** Wraps a value in a {@link Component} with no dependencies. */
+  @SafeVarargs
+  public static <T> Component<T> of(
+      T value, Qualified<T> anInterface, Qualified<? super T>... additionalInterfaces) {
+    return builder(anInterface, additionalInterfaces).factory((args) -> value).build();
+  }
+
   /**
    * Provides a builder for a {@link Set}-multibinding {@link Component}.
    *
@@ -204,6 +245,16 @@ public final class Component<T> {
    * or {@link ComponentContainer#setOfProvider(Class)}.
    */
   public static <T> Component.Builder<T> intoSetBuilder(Class<T> anInterface) {
+    return builder(anInterface).intoSet();
+  }
+
+  /**
+   * Provides a builder for a {@link Set}-multibinding {@link Component}.
+   *
+   * <p>Such components can be requested by dependents via {@link ComponentContainer#setOf(Class)} *
+   * or {@link ComponentContainer#setOfProvider(Class)}.
+   */
+  public static <T> Component.Builder<T> intoSetBuilder(Qualified<T> anInterface) {
     return builder(anInterface).intoSet();
   }
 
@@ -217,26 +268,54 @@ public final class Component<T> {
     return intoSetBuilder(anInterface).factory(c -> value).build();
   }
 
+  /**
+   * Wraps a value in a {@link Set}-multibinding {@link Component} with no dependencies. *
+   *
+   * <p>Such components can be requested by dependents via {@link ComponentContainer#setOf(Class)} *
+   * or {@link ComponentContainer#setOfProvider(Class)}.
+   */
+  public static <T> Component<T> intoSet(T value, Qualified<T> anInterface) {
+    return intoSetBuilder(anInterface).factory(c -> value).build();
+  }
+
   /** FirebaseComponent builder. */
   public static class Builder<T> {
-    private final Set<Class<? super T>> providedInterfaces = new HashSet<>();
+    private String name = null;
+    private final Set<Qualified<? super T>> providedInterfaces = new HashSet<>();
     private final Set<Dependency> dependencies = new HashSet<>();
     private @Instantiation int instantiation = Instantiation.LAZY;
     private @ComponentType int type = ComponentType.VALUE;
     private ComponentFactory<T> factory;
-    private Set<Class<?>> publishedEvents = new HashSet<>();
+    private final Set<Class<?>> publishedEvents = new HashSet<>();
 
     @SafeVarargs
     private Builder(Class<T> anInterface, Class<? super T>... additionalInterfaces) {
       Preconditions.checkNotNull(anInterface, "Null interface");
-      providedInterfaces.add(anInterface);
+      providedInterfaces.add(Qualified.unqualified(anInterface));
       for (Class<? super T> iface : additionalInterfaces) {
+        Preconditions.checkNotNull(iface, "Null interface");
+        providedInterfaces.add(Qualified.unqualified(iface));
+      }
+    }
+
+    @SafeVarargs
+    private Builder(Qualified<T> anInterface, Qualified<? super T>... additionalInterfaces) {
+      Preconditions.checkNotNull(anInterface, "Null interface");
+      providedInterfaces.add(anInterface);
+      for (Qualified<? super T> iface : additionalInterfaces) {
         Preconditions.checkNotNull(iface, "Null interface");
       }
       Collections.addAll(providedInterfaces, additionalInterfaces);
     }
 
+    /** Set a name for the {@link Component} being built. */
+    public Builder<T> name(@NonNull String name) {
+      this.name = name;
+      return this;
+    }
+
     /** Add a {@link Dependency} to the {@link Component} being built. */
+    @CanIgnoreReturnValue
     public Builder<T> add(Dependency dependency) {
       Preconditions.checkNotNull(dependency, "Null dependency");
       validateInterface(dependency.getInterface());
@@ -245,21 +324,25 @@ public final class Component<T> {
     }
 
     /** Make the {@link Component} initialize upon startup. */
+    @CanIgnoreReturnValue
     public Builder<T> alwaysEager() {
       return setInstantiation(Instantiation.ALWAYS_EAGER);
     }
 
     /** Make the component initialize upon startup in default app. */
+    @CanIgnoreReturnValue
     public Builder<T> eagerInDefaultApp() {
       return setInstantiation(Instantiation.EAGER_IN_DEFAULT_APP);
     }
 
     /** Make the {@link Component} eligible to publish events of provided eventType. */
+    @CanIgnoreReturnValue
     public Builder<T> publishes(Class<?> eventType) {
       publishedEvents.add(eventType);
       return this;
     }
 
+    @CanIgnoreReturnValue
     private Builder<T> setInstantiation(@Instantiation int instantiation) {
       Preconditions.checkState(
           this.instantiation == Instantiation.LAZY, "Instantiation type has already been set.");
@@ -267,18 +350,20 @@ public final class Component<T> {
       return this;
     }
 
-    private void validateInterface(Class<?> anInterface) {
+    private void validateInterface(Qualified<?> anInterface) {
       Preconditions.checkArgument(
           !providedInterfaces.contains(anInterface),
           "Components are not allowed to depend on interfaces they themselves provide.");
     }
 
     /** Set the factory that will be used to initialize the {@link Component}. */
+    @CanIgnoreReturnValue
     public Builder<T> factory(ComponentFactory<T> value) {
       factory = Preconditions.checkNotNull(value, "Null factory");
       return this;
     }
 
+    @CanIgnoreReturnValue
     private Builder<T> intoSet() {
       type = ComponentType.SET;
       return this;
@@ -288,6 +373,7 @@ public final class Component<T> {
     public Component<T> build() {
       Preconditions.checkState(factory != null, "Missing required property: factory.");
       return new Component<>(
+          name,
           new HashSet<>(providedInterfaces),
           new HashSet<>(dependencies),
           instantiation,

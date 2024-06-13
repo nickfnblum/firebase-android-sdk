@@ -22,10 +22,15 @@ import com.google.firebase.FirebaseApp;
 import com.google.firebase.abt.FirebaseABTesting;
 import com.google.firebase.abt.component.AbtComponent;
 import com.google.firebase.analytics.connector.AnalyticsConnector;
+import com.google.firebase.annotations.concurrent.Background;
+import com.google.firebase.annotations.concurrent.Blocking;
+import com.google.firebase.annotations.concurrent.Lightweight;
 import com.google.firebase.components.Component;
 import com.google.firebase.components.ComponentContainer;
 import com.google.firebase.components.ComponentRegistrar;
 import com.google.firebase.components.Dependency;
+import com.google.firebase.components.Qualified;
+import com.google.firebase.datatransport.LegacyTransportBackend;
 import com.google.firebase.events.Subscriber;
 import com.google.firebase.inappmessaging.internal.AbtIntegrationHelper;
 import com.google.firebase.inappmessaging.internal.ProgramaticContextualTriggers;
@@ -37,6 +42,7 @@ import com.google.firebase.inappmessaging.internal.injection.modules.AnalyticsEv
 import com.google.firebase.inappmessaging.internal.injection.modules.ApiClientModule;
 import com.google.firebase.inappmessaging.internal.injection.modules.AppMeasurementModule;
 import com.google.firebase.inappmessaging.internal.injection.modules.ApplicationModule;
+import com.google.firebase.inappmessaging.internal.injection.modules.ExecutorsModule;
 import com.google.firebase.inappmessaging.internal.injection.modules.GrpcClientModule;
 import com.google.firebase.inappmessaging.internal.injection.modules.ProgrammaticContextualTriggerFlowableModule;
 import com.google.firebase.inject.Deferred;
@@ -44,6 +50,7 @@ import com.google.firebase.installations.FirebaseInstallationsApi;
 import com.google.firebase.platforminfo.LibraryVersionComponent;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.Executor;
 
 /**
  * Registers {@link FirebaseInAppMessaging}.
@@ -52,22 +59,37 @@ import java.util.List;
  */
 @Keep
 public class FirebaseInAppMessagingRegistrar implements ComponentRegistrar {
+  private static final String LIBRARY_NAME = "fire-fiam";
+  private Qualified<Executor> backgroundExecutor =
+      Qualified.qualified(Background.class, Executor.class);
+  private Qualified<Executor> blockingExecutor =
+      Qualified.qualified(Blocking.class, Executor.class);
+  private Qualified<Executor> lightWeightExecutor =
+      Qualified.qualified(Lightweight.class, Executor.class);
+
+  private Qualified<TransportFactory> legacyTransportFactory =
+      Qualified.qualified(LegacyTransportBackend.class, TransportFactory.class);
+
   @Override
   @Keep
   public List<Component<?>> getComponents() {
     return Arrays.asList(
         Component.builder(FirebaseInAppMessaging.class)
+            .name(LIBRARY_NAME)
             .add(Dependency.required(Context.class))
             .add(Dependency.required(FirebaseInstallationsApi.class))
             .add(Dependency.required(FirebaseApp.class))
             .add(Dependency.required(AbtComponent.class))
             .add(Dependency.deferred(AnalyticsConnector.class))
-            .add(Dependency.required(TransportFactory.class))
+            .add(Dependency.required(legacyTransportFactory))
             .add(Dependency.required(Subscriber.class))
+            .add(Dependency.required(backgroundExecutor))
+            .add(Dependency.required(blockingExecutor))
+            .add(Dependency.required(lightWeightExecutor))
             .factory(this::providesFirebaseInAppMessaging)
             .eagerInDefaultApp()
             .build(),
-        LibraryVersionComponent.create("fire-fiam", BuildConfig.VERSION_NAME));
+        LibraryVersionComponent.create(LIBRARY_NAME, BuildConfig.VERSION_NAME));
   }
 
   private FirebaseInAppMessaging providesFirebaseInAppMessaging(ComponentContainer container) {
@@ -88,6 +110,11 @@ public class FirebaseInAppMessagingRegistrar implements ComponentRegistrar {
             .programmaticContextualTriggerFlowableModule(
                 new ProgrammaticContextualTriggerFlowableModule(
                     new ProgramaticContextualTriggers()))
+            .executorsModule(
+                new ExecutorsModule(
+                    container.get(lightWeightExecutor),
+                    container.get(backgroundExecutor),
+                    container.get(blockingExecutor)))
             .build();
 
     AppComponent instance =
@@ -96,12 +123,13 @@ public class FirebaseInAppMessagingRegistrar implements ComponentRegistrar {
                 new AbtIntegrationHelper(
                     container
                         .get(AbtComponent.class)
-                        .get(FirebaseABTesting.OriginService.INAPP_MESSAGING)))
+                        .get(FirebaseABTesting.OriginService.INAPP_MESSAGING),
+                    container.get(blockingExecutor)))
             .apiClientModule(
                 new ApiClientModule(firebaseApp, firebaseInstallations, universalComponent.clock()))
             .grpcClientModule(new GrpcClientModule(firebaseApp))
             .universalComponent(universalComponent)
-            .transportFactory(container.get(TransportFactory.class))
+            .transportFactory(container.get(legacyTransportFactory))
             .build();
 
     return instance.providesFirebaseInAppMessaging();

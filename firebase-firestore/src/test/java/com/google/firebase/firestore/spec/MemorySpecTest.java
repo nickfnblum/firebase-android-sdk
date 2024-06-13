@@ -28,7 +28,7 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
+@Config(sdk = 21, manifest = Config.NONE)
 public class MemorySpecTest extends SpecTestCase {
 
   private static final String DURABLE_PERSISTENCE = "durable-persistence";
@@ -40,12 +40,12 @@ public class MemorySpecTest extends SpecTestCase {
 
   @Override
   protected MemoryComponentProvider initializeComponentProvider(
-      ComponentProvider.Configuration configuration, boolean garbageCollectionEnabled) {
+      ComponentProvider.Configuration configuration, boolean useEagerGc) {
     MemoryComponentProvider provider =
         new MemoryComponentProvider() {
           @Override
           protected Persistence createPersistence(Configuration configuration) {
-            if (garbageCollectionEnabled) {
+            if (useEagerGc) {
               return MemoryPersistence.createEagerGcMemoryPersistence();
             } else {
               DatabaseId databaseId = DatabaseId.forProject("projectId");

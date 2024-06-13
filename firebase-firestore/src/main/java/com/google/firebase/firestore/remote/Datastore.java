@@ -14,6 +14,7 @@
 
 package com.google.firebase.firestore.remote;
 
+import static com.google.firebase.firestore.util.Assert.hardAssert;
 import static com.google.firebase.firestore.util.Util.exceptionFromStatus;
 
 import android.content.Context;
@@ -21,10 +22,12 @@ import android.os.Build;
 import androidx.annotation.Nullable;
 import com.google.android.gms.tasks.Task;
 import com.google.android.gms.tasks.TaskCompletionSource;
+import com.google.firebase.firestore.AggregateField;
 import com.google.firebase.firestore.FirebaseFirestoreException;
 import com.google.firebase.firestore.auth.CredentialsProvider;
 import com.google.firebase.firestore.auth.User;
 import com.google.firebase.firestore.core.DatabaseInfo;
+import com.google.firebase.firestore.core.Query;
 import com.google.firebase.firestore.model.DocumentKey;
 import com.google.firebase.firestore.model.MutableDocument;
 import com.google.firebase.firestore.model.SnapshotVersion;
@@ -36,6 +39,10 @@ import com.google.firestore.v1.BatchGetDocumentsResponse;
 import com.google.firestore.v1.CommitRequest;
 import com.google.firestore.v1.CommitResponse;
 import com.google.firestore.v1.FirestoreGrpc;
+import com.google.firestore.v1.RunAggregationQueryRequest;
+import com.google.firestore.v1.RunAggregationQueryResponse;
+import com.google.firestore.v1.StructuredAggregationQuery;
+import com.google.firestore.v1.Value;
 import io.grpc.Status;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -215,6 +222,49 @@ public class Datastore {
     return completionSource.getTask();
   }
 
+  public Task<Map<String, Value>> runAggregateQuery(
+      Query query, List<AggregateField> aggregateFields) {
+    com.google.firestore.v1.Target.QueryTarget encodedQueryTarget =
+        serializer.encodeQueryTarget(query.toAggregateTarget());
+    HashMap<String, String> aliasMap = new HashMap<>();
+    StructuredAggregationQuery structuredAggregationQuery =
+        serializer.encodeStructuredAggregationQuery(encodedQueryTarget, aggregateFields, aliasMap);
+
+    RunAggregationQueryRequest.Builder request = RunAggregationQueryRequest.newBuilder();
+    request.setParent(encodedQueryTarget.getParent());
+    request.setStructuredAggregationQuery(structuredAggregationQuery);
+
+    return channel
+        .runRpc(FirestoreGrpc.getRunAggregationQueryMethod(), request.build())
+        .continueWith(
+            workerQueue.getExecutor(),
+            task -> {
+              if (!task.isSuccessful()) {
+                if (task.getException() instanceof FirebaseFirestoreException
+                    && ((FirebaseFirestoreException) task.getException()).getCode()
+                        == FirebaseFirestoreException.Code.UNAUTHENTICATED) {
+                  channel.invalidateToken();
+                }
+                throw task.getException();
+              }
+
+              Map<String, Value> result = new HashMap<>();
+              RunAggregationQueryResponse response = task.getResult();
+
+              // Remap the short-form aliases that were sent to the server to the client-side
+              // aliases. Users will access the results using the client-side alias.
+              for (Map.Entry<String, Value> entry :
+                  response.getResult().getAggregateFieldsMap().entrySet()) {
+                hardAssert(
+                    aliasMap.containsKey(entry.getKey()),
+                    "%s not present in aliasMap",
+                    entry.getKey());
+                result.put(aliasMap.get(entry.getKey()), entry.getValue());
+              }
+              return result;
+            });
+  }
+
   /**
    * Determines whether the given status has an error code that represents a permanent error when
    * received in response to a non-write operation.
@@ -294,8 +344,8 @@ public class Datastore {
    * write stream should be retried too (even though ABORTED errors are not generally retryable).
    *
    * <p>Note that during the initial handshake on the write stream an ABORTED error signals that we
-   * should discard our stream token (i.e. it is permanent). This means a handshake error should be
-   * classified with isPermanentError, above.
+   * should discard our stream token (because it is permanent). This means a handshake error should
+   * be classified with isPermanentError, above.
    */
   public static boolean isPermanentWriteError(Status status) {
     return isPermanentError(status) && !status.getCode().equals(Status.Code.ABORTED);

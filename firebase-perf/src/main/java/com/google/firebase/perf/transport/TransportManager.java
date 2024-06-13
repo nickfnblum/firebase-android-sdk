@@ -17,6 +17,7 @@ package com.google.firebase.perf.transport;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.MINUTES;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager.NameNotFoundException;
@@ -125,6 +126,8 @@ public class TransportManager implements AppStateCallback {
 
   private boolean isForegroundState = false;
 
+  // TODO(b/258263016): Migrate to go/firebase-android-executors
+  @SuppressLint("ThreadPoolCreation")
   private TransportManager() {
     // MAX_POOL_SIZE must always be 1. We only allow one thread in this Executor. The reason
     // we specifically use a ThreadPoolExecutor rather than generating one from ExecutorService
@@ -378,9 +381,8 @@ public class TransportManager implements AppStateCallback {
     if (isAllowedToDispatch(perfMetric)) {
       dispatchLog(perfMetric);
 
-      // TODO(b/172008005): This might not be the best place for this call, consider utilizing a
-      //  callback in the SessionManager itself.
-      SessionManager.getInstance().updatePerfSessionIfExpired();
+      // Check if the session is expired. If so, stop gauge collection.
+      SessionManager.getInstance().stopGaugeCollectionIfSessionRunningTooLong();
     }
   }
 

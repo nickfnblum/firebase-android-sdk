@@ -32,7 +32,7 @@ import static com.google.firebase.inappmessaging.testutil.TestData.TITLE_MODEL;
 import static com.google.firebase.inappmessaging.testutil.TestData.createBannerMessageCustomMetadata;
 import static io.reactivex.BackpressureStrategy.BUFFER;
 import static io.reactivex.schedulers.Schedulers.trampoline;
-import static org.mockito.Matchers.any;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -256,6 +256,27 @@ public class DisplayCallbacksImplTest {
     displayCallbacksImpl.impressionDetected();
 
     assertThat(wasRecorded).isTrue();
+  }
+
+  @Test
+  public void logImpression_forOneMessageShouldNotAffectOtherMessages() {
+    FirebaseInAppMessagingDisplayCallbacks displayCallbacksImplOne =
+        displayCallbacksFactory.generateDisplayCallback(
+            BANNER_TEST_MESSAGE_MODEL, ANALYTICS_EVENT_NAME);
+
+    FirebaseInAppMessagingDisplayCallbacks displayCallbacksImplTwo =
+        displayCallbacksFactory.generateDisplayCallback(
+            BANNER_TEST_MESSAGE_MODEL, ANALYTICS_EVENT_NAME);
+
+    displayCallbacksImplOne.impressionDetected();
+
+    assertThat(((DisplayCallbacksImpl) displayCallbacksImplOne).wasImpressed()).isTrue();
+    assertThat(((DisplayCallbacksImpl) displayCallbacksImplTwo).wasImpressed()).isFalse();
+
+    displayCallbacksImplTwo.impressionDetected();
+
+    assertThat(((DisplayCallbacksImpl) displayCallbacksImplOne).wasImpressed()).isTrue();
+    assertThat(((DisplayCallbacksImpl) displayCallbacksImplTwo).wasImpressed()).isTrue();
   }
 
   @Test

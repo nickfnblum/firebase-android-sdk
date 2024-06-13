@@ -40,31 +40,31 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import org.eclipse.aether.resolution.VersionRangeResolutionException;
 import org.gradle.api.DefaultTask;
+import org.gradle.api.file.DirectoryProperty;
 import org.gradle.api.logging.Logger;
+import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.TaskAction;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
-public class BomGeneratorTask extends DefaultTask {
+public abstract class BomGeneratorTask extends DefaultTask {
   private static final List<String> BOM_ARTIFACTS =
       ImmutableList.of(
           "com.google.firebase:firebase-analytics",
           "com.google.firebase:firebase-analytics-ktx",
           "com.google.firebase:firebase-appcheck-debug",
           "com.google.firebase:firebase-appcheck-debug-testing",
+          "com.google.firebase:firebase-appcheck-ktx",
           "com.google.firebase:firebase-appcheck-playintegrity",
-          "com.google.firebase:firebase-appcheck-safetynet",
           "com.google.firebase:firebase-appcheck",
-          "com.google.firebase:firebase-appindexing",
           "com.google.firebase:firebase-auth",
           "com.google.firebase:firebase-auth-ktx",
           "com.google.firebase:firebase-common",
           "com.google.firebase:firebase-common-ktx",
           "com.google.firebase:firebase-config",
           "com.google.firebase:firebase-config-ktx",
-          "com.google.firebase:firebase-core",
           "com.google.firebase:firebase-crashlytics",
           "com.google.firebase:firebase-crashlytics-ktx",
           "com.google.firebase:firebase-crashlytics-ndk",
@@ -77,7 +77,6 @@ public class BomGeneratorTask extends DefaultTask {
           "com.google.firebase:firebase-firestore-ktx",
           "com.google.firebase:firebase-functions",
           "com.google.firebase:firebase-functions-ktx",
-          "com.google.firebase:firebase-iid",
           "com.google.firebase:firebase-inappmessaging",
           "com.google.firebase:firebase-inappmessaging-display",
           "com.google.firebase:firebase-inappmessaging-display-ktx",
@@ -106,8 +105,12 @@ public class BomGeneratorTask extends DefaultTask {
           "firebase-analytics-license",
           "firebase-annotations",
           "firebase-appcheck-interop",
+          "firebase-appcheck-safetynet",
           "firebase-appdistribution-gradle",
           "firebase-appindexing-license",
+          "firebase-appindexing",
+          "firebase-iid",
+          "firebase-core",
           "firebase-auth-common",
           "firebase-auth-impl",
           "firebase-auth-interop",
@@ -119,6 +122,7 @@ public class BomGeneratorTask extends DefaultTask {
           "firebase-common-license",
           "firebase-components",
           "firebase-config-license",
+          "firebase-config-interop",
           "firebase-crash",
           "firebase-crash-license",
           "firebase-crashlytics-buildtools",
@@ -127,6 +131,7 @@ public class BomGeneratorTask extends DefaultTask {
           "firebase-database-connection",
           "firebase-database-connection-license",
           "firebase-database-license",
+          "firebase-dataconnect",
           "firebase-datatransport",
           "firebase-appdistribution-ktx",
           "firebase-appdistribution",
@@ -146,9 +151,11 @@ public class BomGeneratorTask extends DefaultTask {
           "firebase-ml-model-interpreter",
           "firebase-perf-license",
           "firebase-plugins",
+          "firebase-sessions",
           "firebase-storage-common",
           "firebase-storage-common-license",
           "firebase-storage-license",
+          "firebase-vertexai",
           "perf-plugin",
           "play-services-ads",
           "protolite-well-known-types",
@@ -181,6 +188,9 @@ public class BomGeneratorTask extends DefaultTask {
   private Set<String> allFirebaseArtifacts;
 
   public Map<String, String> versionOverrides = new HashMap<>();
+
+  @OutputDirectory
+  public abstract DirectoryProperty getBomDirectory();
 
   /**
    * This task generates a current Bill of Materials (BoM) based on the latest versions of
@@ -243,8 +253,8 @@ public class BomGeneratorTask extends DefaultTask {
     String version = findArtifactVersion(bomDependencies, currentVersion, previousBomVersions);
 
     // Surface generated pom for sanity checking and testing, and then write it.
-    Path projectRootDir = this.getProject().getRootDir().toPath();
-    PomXmlWriter xmlWriter = new PomXmlWriter(bomDependencies, version, projectRootDir);
+    Path bomDir = getBomDirectory().getAsFile().get().toPath();
+    PomXmlWriter xmlWriter = new PomXmlWriter(bomDependencies, version, bomDir);
     MarkdownDocumentationWriter documentationWriter =
         new MarkdownDocumentationWriter(
             bomDependencies, version, previousBomVersions, currentVersion);

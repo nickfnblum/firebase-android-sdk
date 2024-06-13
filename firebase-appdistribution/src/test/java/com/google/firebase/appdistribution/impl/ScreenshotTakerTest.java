@@ -23,11 +23,15 @@ import static org.robolectric.Shadows.shadowOf;
 
 import android.graphics.Bitmap;
 import android.graphics.Bitmap.Config;
+import android.net.Uri;
 import androidx.test.core.app.ApplicationProvider;
 import com.google.android.gms.tasks.Task;
 import com.google.android.gms.tasks.Tasks;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.FirebaseOptions;
+import com.google.firebase.annotations.concurrent.Background;
+import com.google.firebase.concurrent.TestOnlyExecutors;
+import java.io.File;
 import java.util.concurrent.Executor;
 import org.junit.After;
 import org.junit.Before;
@@ -44,11 +48,11 @@ public class ScreenshotTakerTest {
   private static final String TEST_PROJECT_ID = "project-id";
   private static final String TEST_PROJECT_NUMBER = "123456789";
   private static final Bitmap TEST_SCREENSHOT = Bitmap.createBitmap(400, 400, Config.RGB_565);
-  private static final Executor TEST_EXECUTOR = Runnable::run;
+
+  @Background private static final Executor backgroundExecutor = TestOnlyExecutors.background();
 
   private FirebaseApp firebaseApp;
   @Mock private FirebaseAppDistributionLifecycleNotifier mockLifecycleNotifier;
-
   private ScreenshotTaker screenshotTaker;
 
   @Before
@@ -66,7 +70,10 @@ public class ScreenshotTakerTest {
                 .setApiKey(TEST_API_KEY)
                 .build());
 
-    screenshotTaker = spy(new ScreenshotTaker(firebaseApp, mockLifecycleNotifier, TEST_EXECUTOR));
+    screenshotTaker =
+        spy(
+            new ScreenshotTaker(
+                firebaseApp.getApplicationContext(), mockLifecycleNotifier, backgroundExecutor));
 
     // Taking a screenshot of an actual activity would require an instrumentation test
     doReturn(Tasks.forResult(TEST_SCREENSHOT)).when(screenshotTaker).captureScreenshot();
@@ -80,20 +87,17 @@ public class ScreenshotTakerTest {
   @Test
   public void takeAndDeleteScreenshot_success() throws Exception {
     // Take a screenshot
-    Task<String> task = screenshotTaker.takeScreenshot();
+    Task<Uri> task = screenshotTaker.takeScreenshot();
     shadowOf(getMainLooper()).idle();
-    String screenshotFilename = TestUtils.awaitTask(task);
+    Uri screenshotUri = TestUtils.awaitTask(task);
 
-    assertThat(screenshotFilename).isEqualTo(SCREENSHOT_FILE_NAME);
-    assertThat(
-            ApplicationProvider.getApplicationContext()
-                .getFileStreamPath(SCREENSHOT_FILE_NAME)
-                .length())
-        .isGreaterThan(0);
+    File expectedFile =
+        ApplicationProvider.getApplicationContext().getFileStreamPath(SCREENSHOT_FILE_NAME);
+    assertThat(screenshotUri).isEqualTo(Uri.fromFile(expectedFile));
+    assertThat(expectedFile.length()).isGreaterThan(0);
 
     // Delete the screenshot
-    Task<Void> deleteScreenshot = screenshotTaker.deleteScreenshot();
-    TestUtils.awaitTask(deleteScreenshot);
+    screenshotTaker.deleteScreenshot();
 
     assertThat(
             ApplicationProvider.getApplicationContext()

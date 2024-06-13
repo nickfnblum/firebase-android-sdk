@@ -15,13 +15,11 @@
 package com.google.firebase.appcheck.debug.testing;
 
 import androidx.annotation.NonNull;
-import androidx.annotation.VisibleForTesting;
 import androidx.test.platform.app.InstrumentationRegistry;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.appcheck.AppCheckProviderFactory;
 import com.google.firebase.appcheck.FirebaseAppCheck;
 import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory;
-import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactoryHelper;
 import com.google.firebase.appcheck.internal.DefaultFirebaseAppCheck;
 
 /**
@@ -66,28 +64,16 @@ import com.google.firebase.appcheck.internal.DefaultFirebaseAppCheck;
  * </pre>
  */
 public final class DebugAppCheckTestHelper {
-  private static final String DEBUG_SECRET_KEY = "firebaseAppCheckDebugSecret";
-
-  private final String debugSecret;
-
   /**
-   * Creates a {@link DebugAppCheckTestHelper} instance with the debug secret obtained from {@link
-   * InstrumentationRegistry} arguments.
+   * Creates a {@link DebugAppCheckTestHelper} instance with a debug secret obtained from <br>
+   * {@link InstrumentationRegistry} arguments.
    */
   @NonNull
   public static DebugAppCheckTestHelper fromInstrumentationArgs() {
-    String debugSecret = InstrumentationRegistry.getArguments().getString(DEBUG_SECRET_KEY);
-    return new DebugAppCheckTestHelper(debugSecret);
+    return new DebugAppCheckTestHelper();
   }
 
-  @VisibleForTesting
-  static DebugAppCheckTestHelper fromString(String debugSecret) {
-    return new DebugAppCheckTestHelper(debugSecret);
-  }
-
-  private DebugAppCheckTestHelper(String debugSecret) {
-    this.debugSecret = debugSecret;
-  }
+  private DebugAppCheckTestHelper() {}
 
   /**
    * Installs a {@link DebugAppCheckProviderFactory} to the default {@link FirebaseApp} and runs the
@@ -109,8 +95,7 @@ public final class DebugAppCheckTestHelper {
         (DefaultFirebaseAppCheck) FirebaseAppCheck.getInstance(firebaseApp);
     AppCheckProviderFactory currentAppCheckProviderFactory =
         firebaseAppCheck.getInstalledAppCheckProviderFactory();
-    firebaseAppCheck.installAppCheckProviderFactory(
-        DebugAppCheckProviderFactoryHelper.createDebugAppCheckProviderFactory(debugSecret));
+    firebaseAppCheck.installAppCheckProviderFactory(DebugAppCheckProviderFactory.getInstance());
     try {
       runnable.run();
     } catch (Throwable throwable) {

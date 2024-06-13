@@ -17,12 +17,15 @@ package com.google.firebase.crashlytics.internal.common;
 import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.os.Build;
 import com.google.firebase.crashlytics.internal.DevelopmentPlatformProvider;
+import java.util.List;
 
 /** Carries static information about the app. */
 public class AppData {
   public final String googleAppId;
   public final String buildId;
+  public final List<BuildIdInfo> buildIdInfoList;
 
   public final String installerPackageName;
 
@@ -37,19 +40,21 @@ public class AppData {
       IdManager idManager,
       String googleAppId,
       String buildId,
+      List<BuildIdInfo> buildIdInfoList,
       DevelopmentPlatformProvider developmentPlatformProvider)
       throws PackageManager.NameNotFoundException {
     final String packageName = context.getPackageName();
     final String installerPackageName = idManager.getInstallerPackageName();
     final PackageManager packageManager = context.getPackageManager();
     final PackageInfo packageInfo = packageManager.getPackageInfo(packageName, 0);
-    final String versionCode = Integer.toString(packageInfo.versionCode);
+    final String versionCode = getAppBuildVersion(packageInfo);
     final String versionName =
         packageInfo.versionName == null ? IdManager.DEFAULT_VERSION_NAME : packageInfo.versionName;
 
     return new AppData(
         googleAppId,
         buildId,
+        buildIdInfoList,
         installerPackageName,
         packageName,
         versionCode,
@@ -57,9 +62,19 @@ public class AppData {
         developmentPlatformProvider);
   }
 
+  @SuppressWarnings("DEPRECATION")
+  private static String getAppBuildVersion(PackageInfo packageInfo) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+      return Long.toString(packageInfo.getLongVersionCode());
+    } else {
+      return Integer.toString(packageInfo.versionCode);
+    }
+  }
+
   public AppData(
       String googleAppId,
       String buildId,
+      List<BuildIdInfo> buildIdInfoList,
       String installerPackageName,
       String packageName,
       String versionCode,
@@ -67,6 +82,7 @@ public class AppData {
       DevelopmentPlatformProvider developmentPlatformProvider) {
     this.googleAppId = googleAppId;
     this.buildId = buildId;
+    this.buildIdInfoList = buildIdInfoList;
     this.installerPackageName = installerPackageName;
     this.packageName = packageName;
     this.versionCode = versionCode;

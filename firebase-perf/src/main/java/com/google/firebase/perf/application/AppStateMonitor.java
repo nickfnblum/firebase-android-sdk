@@ -20,8 +20,8 @@ import android.app.Application.ActivityLifecycleCallbacks;
 import android.content.Context;
 import android.os.Bundle;
 import androidx.annotation.NonNull;
+import androidx.annotation.VisibleForTesting;
 import androidx.fragment.app.FragmentActivity;
-import com.google.android.gms.common.util.VisibleForTesting;
 import com.google.firebase.perf.config.ConfigResolver;
 import com.google.firebase.perf.logging.AndroidLogger;
 import com.google.firebase.perf.metrics.FrameMetricsCalculator.PerfFrameMetrics;
@@ -290,7 +290,7 @@ public class AppStateMonitor implements ActivityLifecycleCallbacks {
    * @param subscriber the {@link AppColdStartCallback} instance.
    */
   public void registerForAppColdStart(AppColdStartCallback subscriber) {
-    synchronized (appStateSubscribers) {
+    synchronized (appColdStartSubscribers) {
       appColdStartSubscribers.add(subscriber);
     }
   }
@@ -315,7 +315,7 @@ public class AppStateMonitor implements ActivityLifecycleCallbacks {
 
   /** Send cold start update to registered subscribers. */
   private void sendAppColdStartUpdate() {
-    synchronized (appStateSubscribers) {
+    synchronized (appColdStartSubscribers) {
       for (Iterator<AppColdStartCallback> i = appColdStartSubscribers.iterator(); i.hasNext(); ) {
         AppColdStartCallback callback = i.next();
         if (callback != null) {

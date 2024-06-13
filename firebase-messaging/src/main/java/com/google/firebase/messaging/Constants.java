@@ -104,6 +104,9 @@ public final class Constants {
      */
     public static final String PRIORITY_REDUCED_V19 = RESERVED_PREFIX + "priority_reduced";
 
+    /** Product ID of message. */
+    public static final String PRODUCT_ID = RESERVED_PREFIX + "product_id";
+
     /**
      * Prefix "google.c" for keys that are reserved for the client library. While all the other
      * "google." are removed at GmsCore level, google.c keys are preserved in the intent extras, and
@@ -269,8 +272,8 @@ public final class Constants {
     public static final String FCM_LOG_SOURCE = "FCM_CLIENT_EVENT_LOGGING";
 
     /**
-     * These are the canonical priority constants used in proto logs. They differ from the {@link
-     * RemoteMessage} priority values.
+     * These are the canonical priority constants used in proto logs. <br>
+     * They differ from the {@link RemoteMessage} priority values.
      */
     @IntDef({MessagePriority.UNKNOWN, MessagePriority.NORMAL, MessagePriority.HIGH})
     @Retention(RetentionPolicy.SOURCE)

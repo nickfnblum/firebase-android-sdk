@@ -20,7 +20,7 @@ import static com.google.firebase.remoteconfig.AbtExperimentHelper.createAbtExpe
 import static com.google.firebase.remoteconfig.AbtExperimentHelper.createAbtExperiments;
 import static com.google.firebase.remoteconfig.RemoteConfigComponent.CONNECTION_TIMEOUT_IN_SECONDS;
 import static com.google.firebase.remoteconfig.RemoteConfigComponent.DEFAULT_NAMESPACE;
-import static org.mockito.Matchers.any;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -40,7 +40,12 @@ import com.google.firebase.remoteconfig.internal.ConfigFetchHandler;
 import com.google.firebase.remoteconfig.internal.ConfigFetchHttpClient;
 import com.google.firebase.remoteconfig.internal.ConfigGetParameterHandler;
 import com.google.firebase.remoteconfig.internal.ConfigMetadataClient;
+import com.google.firebase.remoteconfig.internal.rollouts.RolloutsStateSubscriptionsHandler;
+import com.google.firebase.remoteconfig.interop.rollouts.RolloutsStateSubscriber;
+import java.util.Date;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -48,12 +53,9 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
+import org.robolectric.annotation.LooperMode;
 
-/**
- * Unit tests for the Firebase Remote Config Component.
- *
- * @author Miraziz Yusupov
- */
+/** Unit tests for the Firebase Remote Config Component. */
 @RunWith(RobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
 public class RemoteConfigComponentTest {
@@ -72,10 +74,15 @@ public class RemoteConfigComponentTest {
   @Mock private ConfigFetchHandler mockFetchHandler;
   @Mock private ConfigGetParameterHandler mockGetParameterHandler;
   @Mock private ConfigMetadataClient mockMetadataClient;
+  @Mock private RolloutsStateSubscriptionsHandler mockRolloutsStateSubscriptionsHandler;
+
+  @Mock private RolloutsStateSubscriber mockRolloutsStateSubscriber;
 
   private Context context;
   private ExecutorService directExecutor;
+  private ScheduledExecutorService scheduledExecutorService;
   private FirebaseApp defaultApp;
+  private ConfigMetadataClient metadataClient;
 
   @Before
   public void setUp() {
@@ -83,8 +90,11 @@ public class RemoteConfigComponentTest {
 
     context = ApplicationProvider.getApplicationContext();
     directExecutor = MoreExecutors.newDirectExecutorService();
+    scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
 
     defaultApp = initializeFirebaseApp(context);
+
+    metadataClient = RemoteConfigComponent.getMetadataClient(context, APP_ID, "personalization");
 
     when(mockFirebaseApp.getOptions())
         .thenReturn(new FirebaseOptions.Builder().setApplicationId(APP_ID).build());
@@ -92,10 +102,12 @@ public class RemoteConfigComponentTest {
   }
 
   @Test
+  @LooperMode(LooperMode.Mode.LEGACY)
   public void frc2p_doesNotCallAbt() throws Exception {
 
     FirebaseRemoteConfig fireperfFrc =
-        getFrcInstanceFromComponent(getNewFrcComponent(), /* namespace= */ "fireperf");
+        getFrcInstanceFromComponentWithMetadataClient(
+            getNewFrcComponent(), /* namespace= */ "fireperf");
     loadConfigsWithExperimentsForActivate();
 
     assertWithMessage("Fireperf fetch and activate failed!")
@@ -106,11 +118,13 @@ public class RemoteConfigComponentTest {
   }
 
   @Test
+  @LooperMode(LooperMode.Mode.LEGACY)
   public void frcNonMainFirebaseApp_doesNotCallAbt() throws Exception {
 
     when(mockFirebaseApp.getName()).thenReturn("secondary");
     FirebaseRemoteConfig frc =
-        getFrcInstanceFromComponent(getNewFrcComponentWithoutLoadingDefault(), DEFAULT_NAMESPACE);
+        getFrcInstanceFromComponentWithMetadataClient(
+            getNewFrcComponentWithoutLoadingDefault(), DEFAULT_NAMESPACE);
     loadConfigsWithExperimentsForActivate();
 
     assertWithMessage("Fetch and activate failed!").that(frc.activate().getResult()).isTrue();
@@ -165,10 +179,25 @@ public class RemoteConfigComponentTest {
     assertThat(actualReadTimeout).isEqualTo(customConnectionTimeoutInSeconds);
   }
 
+  @Test
+  public void registerRolloutsStateSubscriber_firebaseNamespace_callsSubscriptionHandler() {
+    // Mock metadata client response since Realtime handler can't be mocked here.
+    when(mockMetadataClient.getRealtimeBackoffMetadata())
+        .thenReturn(new ConfigMetadataClient.RealtimeBackoffMetadata(0, new Date()));
+
+    RemoteConfigComponent frcComponent = getNewFrcComponent();
+    FirebaseRemoteConfig instance = getFrcInstanceFromComponent(frcComponent, DEFAULT_NAMESPACE);
+
+    frcComponent.registerRolloutsStateSubscriber(DEFAULT_NAMESPACE, mockRolloutsStateSubscriber);
+
+    verify(instance.getRolloutsStateSubscriptionsHandler())
+        .registerRolloutsStateSubscriber(mockRolloutsStateSubscriber);
+  }
+
   private RemoteConfigComponent getNewFrcComponent() {
     return new RemoteConfigComponent(
         context,
-        directExecutor,
+        scheduledExecutorService,
         mockFirebaseApp,
         mockFirebaseInstallations,
         mockFirebaseAbt,
@@ -179,12 +208,29 @@ public class RemoteConfigComponentTest {
   private RemoteConfigComponent getNewFrcComponentWithoutLoadingDefault() {
     return new RemoteConfigComponent(
         context,
-        directExecutor,
+        scheduledExecutorService,
         mockFirebaseApp,
         mockFirebaseInstallations,
         mockFirebaseAbt,
         () -> mockAnalyticsConnector,
         /* loadGetDefault= */ false);
+  }
+
+  private FirebaseRemoteConfig getFrcInstanceFromComponentWithMetadataClient(
+      RemoteConfigComponent frcComponent, String namespace) {
+    return frcComponent.get(
+        mockFirebaseApp,
+        namespace,
+        mockFirebaseInstallations,
+        mockFirebaseAbt,
+        directExecutor,
+        mockFetchedCache,
+        mockActivatedCache,
+        mockDefaultsCache,
+        mockFetchHandler,
+        mockGetParameterHandler,
+        metadataClient,
+        mockRolloutsStateSubscriptionsHandler);
   }
 
   private FirebaseRemoteConfig getFrcInstanceFromComponent(
@@ -200,7 +246,8 @@ public class RemoteConfigComponentTest {
         mockDefaultsCache,
         mockFetchHandler,
         mockGetParameterHandler,
-        mockMetadataClient);
+        mockMetadataClient,
+        mockRolloutsStateSubscriptionsHandler);
   }
 
   private void loadConfigsWithExperimentsForActivate() throws Exception {

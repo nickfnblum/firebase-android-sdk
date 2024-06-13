@@ -16,6 +16,8 @@ package com.google.firebase.firestore.testutil;
 
 import static com.google.firebase.firestore.testutil.TestUtil.map;
 import static com.google.firebase.firestore.util.Util.autoId;
+import static java.util.Arrays.asList;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 
 import android.content.Context;
@@ -35,7 +37,10 @@ import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.FirebaseFirestoreSettings;
 import com.google.firebase.firestore.ListenerRegistration;
 import com.google.firebase.firestore.MetadataChanges;
+import com.google.firebase.firestore.Query;
 import com.google.firebase.firestore.QuerySnapshot;
+import com.google.firebase.firestore.Source;
+import com.google.firebase.firestore.WriteBatch;
 import com.google.firebase.firestore.auth.User;
 import com.google.firebase.firestore.core.DatabaseInfo;
 import com.google.firebase.firestore.model.DatabaseId;
@@ -82,10 +87,18 @@ class MockCredentialsProvider extends EmptyCredentialsProvider {
 /** A set of helper methods for tests */
 public class IntegrationTestUtil {
 
-  // Whether the integration tests should run against a local Firestore emulator instead of the
-  // Production environment. Note that the Android Emulator treats "10.0.2.2" as its host machine.
-  // TODO(mrschmidt): Support multiple environments (Emulator, QA, Nightly, Production)
-  private static final boolean CONNECT_TO_EMULATOR = BuildConfig.USE_EMULATOR_FOR_TESTS;
+  public enum TargetBackend {
+    EMULATOR,
+    QA,
+    NIGHTLY,
+    PROD
+  }
+
+  // Set this to the desired enum value to change the target backend when running tests locally.
+  // Note: DO NOT change this variable except for local testing.
+  private static final TargetBackend backendForLocalTesting = null;
+
+  private static final TargetBackend backend = getTargetBackend();
   private static final String EMULATOR_HOST = "10.0.2.2";
   private static final int EMULATOR_PORT = 8080;
 
@@ -120,34 +133,56 @@ public class IntegrationTestUtil {
     return provider;
   }
 
-  public static DatabaseInfo testEnvDatabaseInfo() {
-    if (CONNECT_TO_EMULATOR) {
-      return new DatabaseInfo(
-          DatabaseId.forProject(provider.projectId()),
-          "test-persistenceKey",
-          String.format("%s:%d", EMULATOR_HOST, EMULATOR_PORT),
-          /*sslEnabled=*/ false);
-    } else {
-      return new DatabaseInfo(
-          DatabaseId.forProject(provider.projectId()),
-          "test-persistenceKey",
-          provider.firestoreHost(),
-          /*sslEnabled=*/ true);
+  private static String getFirestoreHost() {
+    switch (backend) {
+      case EMULATOR:
+        return String.format("%s:%d", EMULATOR_HOST, EMULATOR_PORT);
+      case QA:
+        return "staging-firestore.sandbox.googleapis.com";
+      case NIGHTLY:
+        return "test-firestore.sandbox.googleapis.com";
+      case PROD:
+      default:
+        return "firestore.googleapis.com";
     }
   }
 
-  public static FirebaseFirestoreSettings newTestSettings() {
-    FirebaseFirestoreSettings.Builder settings = new FirebaseFirestoreSettings.Builder();
+  private static boolean getSslEnabled() {
+    // ssl is enabled in all environments except for the emulator.
+    return !isRunningAgainstEmulator();
+  }
 
-    if (CONNECT_TO_EMULATOR) {
-      settings.setHost(String.format("%s:%d", EMULATOR_HOST, EMULATOR_PORT));
-      settings.setSslEnabled(false);
-    } else {
-      settings.setHost(provider.firestoreHost());
+  public static TargetBackend getTargetBackend() {
+    if (backendForLocalTesting != null) {
+      return backendForLocalTesting;
     }
+    switch (BuildConfig.TARGET_BACKEND) {
+      case "emulator":
+        return TargetBackend.EMULATOR;
+      case "qa":
+        return TargetBackend.QA;
+      case "nightly":
+        return TargetBackend.NIGHTLY;
+      case "prod":
+        return TargetBackend.PROD;
+      default:
+        throw new RuntimeException("Unknown backend configuration used for integration tests.");
+    }
+  }
 
-    settings.setPersistenceEnabled(true);
+  public static DatabaseInfo testEnvDatabaseInfo() {
+    return new DatabaseInfo(
+        DatabaseId.forProject(provider.projectId()),
+        "test-persistenceKey",
+        getFirestoreHost(),
+        getSslEnabled());
+  }
 
+  public static FirebaseFirestoreSettings newTestSettings() {
+    Logger.debug("IntegrationTestUtil", "target backend is: %s", backend.name());
+    FirebaseFirestoreSettings.Builder settings = new FirebaseFirestoreSettings.Builder();
+    settings.setHost(getFirestoreHost());
+    settings.setSslEnabled(getSslEnabled());
     return settings.build();
   }
 
@@ -251,11 +286,22 @@ public class IntegrationTestUtil {
       Logger.Level logLevel,
       FirebaseFirestoreSettings settings,
       String persistenceKey) {
+    return testFirestore(
+        DatabaseId.forDatabase(projectId, BuildConfig.TARGET_DATABASE_ID),
+        logLevel,
+        settings,
+        persistenceKey);
+  }
+
+  public static FirebaseFirestore testFirestore(
+      DatabaseId databaseId,
+      Logger.Level logLevel,
+      FirebaseFirestoreSettings settings,
+      String persistenceKey) {
     // This unfortunately is a global setting that affects existing Firestore clients.
     Logger.setLogLevel(logLevel);
 
     Context context = ApplicationProvider.getApplicationContext();
-    DatabaseId databaseId = DatabaseId.forDatabase(projectId, DatabaseId.DEFAULT_DATABASE_ID);
 
     ensureStrictMode();
 
@@ -316,8 +362,27 @@ public class IntegrationTestUtil {
 
   public static void writeAllDocs(
       CollectionReference collection, Map<String, Map<String, Object>> docs) {
+    WriteBatch writeBatch = null;
+    int writeBatchSize = 0;
+
     for (Map.Entry<String, Map<String, Object>> doc : docs.entrySet()) {
-      waitFor(collection.document(doc.getKey()).set(doc.getValue()));
+      if (writeBatch == null) {
+        writeBatch = collection.getFirestore().batch();
+      }
+
+      writeBatch.set(collection.document(doc.getKey()), doc.getValue());
+      writeBatchSize++;
+
+      // Write batches are capped at 500 writes. Use 400 just to be safe.
+      if (writeBatchSize == 400) {
+        waitFor(writeBatch.commit());
+        writeBatch = null;
+        writeBatchSize = 0;
+      }
+    }
+
+    if (writeBatch != null) {
+      waitFor(writeBatch.commit());
     }
   }
 
@@ -435,7 +500,7 @@ public class IntegrationTestUtil {
   }
 
   public static boolean isRunningAgainstEmulator() {
-    return CONNECT_TO_EMULATOR;
+    return backend.equals(TargetBackend.EMULATOR);
   }
 
   public static void testChangeUserTo(User user) {
@@ -446,5 +511,24 @@ public class IntegrationTestUtil {
     List<Object> nullArray = new ArrayList<>();
     nullArray.add(null);
     return nullArray;
+  }
+
+  /**
+   * Checks that running the query while online (against the backend/emulator) results in the same
+   * documents as running the query while offline. If `expectedDocs` is provided, it also checks
+   * that both online and offline query result is equal to the expected documents.
+   *
+   * @param query The query to check
+   * @param expectedDocs Ordered list of document keys that are expected to match the query
+   */
+  public static void checkOnlineAndOfflineResultsMatch(Query query, String... expectedDocs) {
+    QuerySnapshot docsFromServer = waitFor(query.get(Source.SERVER));
+    QuerySnapshot docsFromCache = waitFor(query.get(Source.CACHE));
+
+    assertEquals(querySnapshotToIds(docsFromServer), querySnapshotToIds(docsFromCache));
+    List<String> expected = asList(expectedDocs);
+    if (!expected.isEmpty()) {
+      assertEquals(expected, querySnapshotToIds(docsFromCache));
+    }
   }
 }

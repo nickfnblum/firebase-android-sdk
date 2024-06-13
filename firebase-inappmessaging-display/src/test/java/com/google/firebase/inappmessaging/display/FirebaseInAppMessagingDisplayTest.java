@@ -26,6 +26,7 @@ import static com.google.firebase.inappmessaging.testutil.TestData.WEB_ACTION_UR
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.refEq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -61,6 +62,7 @@ import com.google.firebase.inappmessaging.display.internal.FiamAnimator;
 import com.google.firebase.inappmessaging.display.internal.FiamImageLoader;
 import com.google.firebase.inappmessaging.display.internal.FiamImageLoader.Callback;
 import com.google.firebase.inappmessaging.display.internal.FiamWindowManager;
+import com.google.firebase.inappmessaging.display.internal.GlideErrorListener;
 import com.google.firebase.inappmessaging.display.internal.InAppMessageLayoutConfig;
 import com.google.firebase.inappmessaging.display.internal.RenewableTimer;
 import com.google.firebase.inappmessaging.display.internal.bindingwrappers.BannerBindingWrapper;
@@ -87,11 +89,13 @@ import org.mockito.MockitoAnnotations;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
+import org.robolectric.annotation.LooperMode;
 import org.robolectric.shadows.ShadowActivity;
 import org.robolectric.shadows.ShadowPackageManager;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 21, qualifiers = "port")
+@LooperMode(LooperMode.Mode.LEGACY)
 public class FirebaseInAppMessagingDisplayTest {
 
   private com.google.firebase.inappmessaging.display.FirebaseInAppMessagingDisplay fiamUI;
@@ -417,6 +421,8 @@ public class FirebaseInAppMessagingDisplayTest {
 
     verify(fiamImageRequestCreator).tag(TestActivity.class);
     verify(fiamImageRequestCreator).placeholder(R.drawable.image_placeholder);
+    verify(fiamImageRequestCreator)
+        .addErrorListener(refEq(new GlideErrorListener(IMAGE_MESSAGE_MODEL, callbacks)));
     verify(fiamImageRequestCreator).into(any(ImageView.class), any(Callback.class));
   }
 
@@ -426,6 +432,7 @@ public class FirebaseInAppMessagingDisplayTest {
     listener.displayMessage(null, callbacks);
     verify(fiamImageRequestCreator, times(0)).tag(TestActivity.class);
     verify(fiamImageRequestCreator, times(0)).placeholder(R.drawable.image_placeholder);
+    verify(fiamImageRequestCreator, times(0)).addErrorListener(any(GlideErrorListener.class));
     verify(fiamImageRequestCreator, times(0)).into(any(ImageView.class), any(Callback.class));
   }
 

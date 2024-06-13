@@ -30,7 +30,7 @@ import com.google.firestore.v1.Value;
  * <p>Notes:
  * <li>ServerTimestamp Values are created as the result of applying a transform. They can only exist
  *     in the local view of a document. Therefore they do not need to be parsed or serialized.
- * <li>When evaluated locally (e.g. via DocumentSnapshot data), they evaluate to null.
+ * <li>When evaluated locally (for example, via DocumentSnapshot data), they evaluate to null.
  * <li>They sort after all Timestamp Values. With respect to other ServerTimestamp Values, they sort
  *     by their localWriteTime.
  */
@@ -62,6 +62,16 @@ public final class ServerTimestamps {
             .putFields(TYPE_KEY, encodedType)
             .putFields(LOCAL_WRITE_TIME_KEY, encodeWriteTime);
 
+    // We should avoid storing deeply nested server timestamp map values, because we never use the
+    // intermediate "previous values".
+    // For example:
+    // previous: 42L, add: t1, result: t1 -> 42L
+    // previous: t1,  add: t2, result: t2 -> 42L (NOT t2 -> t1 -> 42L)
+    // previous: t2,  add: t3, result: t3 -> 42L (NOT t3 -> t2 -> t1 -> 42L)
+    // previous: t3,  add: t4, result: t4 -> 42L (NOT t4 -> t3 -> t2 -> t1 -> 42L)
+    // `getPreviousValue` recursively traverses server timestamps to find the least recent Value.
+    previousValue =
+        isServerTimestamp(previousValue) ? getPreviousValue(previousValue) : previousValue;
     if (previousValue != null) {
       mapRepresentation.putFields(PREVIOUS_VALUE_KEY, previousValue);
     }

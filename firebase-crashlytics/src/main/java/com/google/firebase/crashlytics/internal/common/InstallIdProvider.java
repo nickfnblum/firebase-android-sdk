@@ -14,8 +14,40 @@
 
 package com.google.firebase.crashlytics.internal.common;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import com.google.auto.value.AutoValue;
+
 public interface InstallIdProvider {
 
-  /** @return an ID that uniquely identifies the app installation on the current device. */
-  String getCrashlyticsInstallId();
+  /** Returns an InstallIds that uniquely identifies the app installation on the current device. */
+  InstallIds getInstallIds();
+
+  @AutoValue
+  abstract class InstallIds {
+    @NonNull
+    public abstract String getCrashlyticsInstallId();
+
+    @Nullable
+    public abstract String getFirebaseInstallationId();
+
+    @Nullable
+    public abstract String getFirebaseAuthenticationToken();
+
+    /** Creates an InstallIds with just a crashlyticsInstallId, no firebaseInstallationId. */
+    public static InstallIds createWithoutFid(String crashlyticsInstallId) {
+      return new AutoValue_InstallIdProvider_InstallIds(
+          crashlyticsInstallId,
+          /* firebaseInstallationId= */ null,
+          /* firebaseAuthenticationToken= */ null);
+    }
+
+    static InstallIds create(
+        String crashlyticsInstallId, FirebaseInstallationId firebaseInstallationId) {
+      return new AutoValue_InstallIdProvider_InstallIds(
+          crashlyticsInstallId,
+          firebaseInstallationId.getFid(),
+          firebaseInstallationId.getAuthToken());
+    }
+  }
 }

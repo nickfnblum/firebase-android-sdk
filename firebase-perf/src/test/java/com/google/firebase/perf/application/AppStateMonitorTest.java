@@ -15,6 +15,7 @@
 package com.google.firebase.perf.application;
 
 import static com.google.common.truth.Truth.assertThat;
+import static com.google.firebase.perf.application.AppStateMonitor.AppStateCallback;
 import static com.google.firebase.perf.v1.ApplicationProcessState.FOREGROUND_BACKGROUND;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.nullable;
@@ -38,7 +39,6 @@ import com.google.firebase.perf.config.ConfigResolver;
 import com.google.firebase.perf.config.DeviceCacheManager;
 import com.google.firebase.perf.metrics.NetworkRequestMetricBuilder;
 import com.google.firebase.perf.metrics.Trace;
-import com.google.firebase.perf.session.SessionManager;
 import com.google.firebase.perf.session.gauges.GaugeManager;
 import com.google.firebase.perf.transport.TransportManager;
 import com.google.firebase.perf.util.Clock;
@@ -46,7 +46,6 @@ import com.google.firebase.perf.util.Constants;
 import com.google.firebase.perf.util.ImmutableBundle;
 import com.google.firebase.perf.util.Timer;
 import com.google.firebase.perf.v1.ApplicationProcessState;
-import com.google.firebase.perf.v1.PerfSession;
 import com.google.firebase.perf.v1.TraceMetric;
 import com.google.testing.timing.FakeDirectExecutorService;
 import java.lang.ref.WeakReference;
@@ -670,9 +669,11 @@ public class AppStateMonitorTest extends FirebasePerformanceTestBase {
     AppStateMonitor monitor = new AppStateMonitor(transportManager, clock);
     Map<Integer, ApplicationProcessState> subscriberState = new HashMap<>();
 
+    // Register callbacks, but note that each callback is saved in a local variable. Otherwise
+    // WeakReference can get garbage collected, making this test flaky.
     final int subscriber1 = 1;
-    monitor.registerForAppState(
-        new WeakReference<>(newState -> subscriberState.put(subscriber1, newState)));
+    AppStateCallback callback1 = newState -> subscriberState.put(subscriber1, newState);
+    monitor.registerForAppState(new WeakReference<>(callback1));
 
     // Activity comes to Foreground
     monitor.onActivityResumed(activity1);
@@ -688,17 +689,19 @@ public class AppStateMonitorTest extends FirebasePerformanceTestBase {
     AppStateMonitor monitor = new AppStateMonitor(transportManager, clock);
     Map<Integer, ApplicationProcessState> subscriberState = new HashMap<>();
 
+    // Register callbacks, but note that each callback is saved in a local variable. Otherwise
+    // WeakReference can get garbage collected, making this test flaky.
     final int subscriber1 = 1;
-    monitor.registerForAppState(
-        new WeakReference<>(newState -> subscriberState.put(subscriber1, newState)));
+    AppStateCallback callback1 = newState -> subscriberState.put(subscriber1, newState);
+    monitor.registerForAppState(new WeakReference<>(callback1));
 
     final int subscriber2 = 2;
-    monitor.registerForAppState(
-        new WeakReference<>(newState -> subscriberState.put(subscriber2, newState)));
+    AppStateCallback callback2 = newState -> subscriberState.put(subscriber2, newState);
+    monitor.registerForAppState(new WeakReference<>(callback2));
 
     final int subscriber3 = 3;
-    monitor.registerForAppState(
-        new WeakReference<>(newState -> subscriberState.put(subscriber3, newState)));
+    AppStateCallback callback3 = newState -> subscriberState.put(subscriber3, newState);
+    monitor.registerForAppState(new WeakReference<>(callback3));
 
     // Activity comes to Foreground
     monitor.onActivityResumed(activity1);
@@ -766,32 +769,6 @@ public class AppStateMonitorTest extends FirebasePerformanceTestBase {
     // Activity comes to Foreground
     monitor.onActivityResumed(activity1);
     verify(mockInitializer1, times(1)).onAppColdStart();
-  }
-
-  @Test
-  public void updatePerfSession_isAfterSendingForegroundOrBackgroundSession() {
-    AppStateMonitor monitor = new AppStateMonitor(transportManager, clock);
-    monitor.registerForAppState(SessionManager.getInstance().getAppStateCallback());
-    monitor.setStopTime(new Timer(currentTime));
-    monitor.setIsColdStart(false);
-    // Mandatory due to circular dependencies of singletons AppStateMonitor and SessionManager
-    AppStateMonitor.getInstance().setIsColdStart(false);
-
-    // Foreground -> Background, sends _fs
-    PerfSession currentSession = SessionManager.getInstance().perfSession().build();
-    monitor.onActivityResumed(activity1);
-
-    verify(transportManager, times(1)).log(argTraceMetric.capture(), eq(FOREGROUND_BACKGROUND));
-    PerfSession sentSession = argTraceMetric.getValue().getPerfSessions(0);
-    Assert.assertEquals(currentSession, sentSession);
-
-    // Background -> Foreground, sends _bs
-    currentSession = SessionManager.getInstance().perfSession().build();
-    monitor.onActivityStopped(activity1);
-
-    verify(transportManager, times(2)).log(argTraceMetric.capture(), eq(FOREGROUND_BACKGROUND));
-    sentSession = argTraceMetric.getValue().getPerfSessions(0);
-    Assert.assertEquals(currentSession, sentSession);
   }
 
   private static Activity createFakeActivity(boolean isHardwareAccelerated) {

@@ -18,6 +18,7 @@ import android.util.Log;
 import androidx.annotation.RestrictTo;
 import androidx.annotation.RestrictTo.Scope;
 import androidx.annotation.VisibleForTesting;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import com.google.firebase.dynamicloading.ComponentLoader;
 import com.google.firebase.events.Publisher;
 import com.google.firebase.events.Subscriber;
@@ -42,14 +43,16 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>Does {@link Component} dependency resolution and provides access to resolved {@link
  * Component}s via {@link #get(Class)} method.
  */
-public class ComponentRuntime extends AbstractComponentContainer implements ComponentLoader {
+public class ComponentRuntime implements ComponentContainer, ComponentLoader {
   private static final Provider<Set<Object>> EMPTY_PROVIDER = Collections::emptySet;
   private final Map<Component<?>, Provider<?>> components = new HashMap<>();
-  private final Map<Class<?>, Provider<?>> lazyInstanceMap = new HashMap<>();
-  private final Map<Class<?>, LazySet<?>> lazySetMap = new HashMap<>();
+  private final Map<Qualified<?>, Provider<?>> lazyInstanceMap = new HashMap<>();
+  private final Map<Qualified<?>, LazySet<?>> lazySetMap = new HashMap<>();
   private final List<Provider<ComponentRegistrar>> unprocessedRegistrarProviders;
+  private Set<String> processedCoroutineDispatcherInterfaces = new HashSet<>();
   private final EventBus eventBus;
   private final AtomicReference<Boolean> eagerComponentsInitializedWith = new AtomicReference<>();
+  private final ComponentRegistrarProcessor componentRegistrarProcessor;
 
   /**
    * Creates an instance of {@link ComponentRuntime} for the provided {@link ComponentRegistrar}s
@@ -62,7 +65,11 @@ public class ComponentRuntime extends AbstractComponentContainer implements Comp
       Executor defaultEventExecutor,
       Iterable<ComponentRegistrar> registrars,
       Component<?>... additionalComponents) {
-    this(defaultEventExecutor, toProviders(registrars), Arrays.asList(additionalComponents));
+    this(
+        defaultEventExecutor,
+        toProviders(registrars),
+        Arrays.asList(additionalComponents),
+        ComponentRegistrarProcessor.NOOP);
   }
 
   /** A builder for creating {@link ComponentRuntime} instances. */
@@ -73,8 +80,10 @@ public class ComponentRuntime extends AbstractComponentContainer implements Comp
   private ComponentRuntime(
       Executor defaultEventExecutor,
       Iterable<Provider<ComponentRegistrar>> registrars,
-      Collection<Component<?>> additionalComponents) {
+      Collection<Component<?>> additionalComponents,
+      ComponentRegistrarProcessor componentRegistrarProcessor) {
     eventBus = new EventBus(defaultEventExecutor);
+    this.componentRegistrarProcessor = componentRegistrarProcessor;
 
     List<Component<?>> componentsToAdd = new ArrayList<>();
 
@@ -106,12 +115,31 @@ public class ComponentRuntime extends AbstractComponentContainer implements Comp
         try {
           ComponentRegistrar registrar = provider.get();
           if (registrar != null) {
-            componentsToAdd.addAll(registrar.getComponents());
+            componentsToAdd.addAll(componentRegistrarProcessor.processRegistrar(registrar));
             iterator.remove();
           }
         } catch (InvalidRegistrarException ex) {
           iterator.remove();
           Log.w(ComponentDiscovery.TAG, "Invalid component registrar.", ex);
+        }
+      }
+
+      // kotlinx.coroutines.CoroutineDispatcher interfaces could be provided by both new version of
+      // firebase-common and old version of firebase-common-ktx. In this scenario take the first
+      // interface which was provided.
+
+      Iterator<Component<?>> it = componentsToAdd.iterator();
+      while (it.hasNext()) {
+        Component component = it.next();
+        for (Object anInterface : component.getProvidedInterfaces().toArray()) {
+          if (anInterface.toString().contains("kotlinx.coroutines.CoroutineDispatcher")) {
+            if (processedCoroutineDispatcherInterfaces.contains(anInterface.toString())) {
+              it.remove();
+              break;
+            } else {
+              processedCoroutineDispatcherInterfaces.add(anInterface.toString());
+            }
+          }
         }
       }
 
@@ -176,7 +204,7 @@ public class ComponentRuntime extends AbstractComponentContainer implements Comp
       }
 
       Provider<?> provider = components.get(component);
-      for (Class<?> anInterface : component.getProvidedInterfaces()) {
+      for (Qualified<?> anInterface : component.getProvidedInterfaces()) {
         if (!lazyInstanceMap.containsKey(anInterface)) {
           lazyInstanceMap.put(anInterface, provider);
         } else {
@@ -195,7 +223,7 @@ public class ComponentRuntime extends AbstractComponentContainer implements Comp
   /** Populates lazySetMap to make set components available for consumption via set dependencies. */
   private List<Runnable> processSetComponents() {
     ArrayList<Runnable> runnables = new ArrayList<>();
-    Map<Class<?>, Set<Provider<?>>> setIndex = new HashMap<>();
+    Map<Qualified<?>, Set<Provider<?>>> setIndex = new HashMap<>();
     for (Map.Entry<Component<?>, Provider<?>> entry : components.entrySet()) {
       Component<?> component = entry.getKey();
 
@@ -206,7 +234,7 @@ public class ComponentRuntime extends AbstractComponentContainer implements Comp
 
       Provider<?> provider = entry.getValue();
 
-      for (Class<?> anInterface : component.getProvidedInterfaces()) {
+      for (Qualified<?> anInterface : component.getProvidedInterfaces()) {
         if (!setIndex.containsKey(anInterface)) {
           setIndex.put(anInterface, new HashSet<>());
         }
@@ -214,13 +242,16 @@ public class ComponentRuntime extends AbstractComponentContainer implements Comp
       }
     }
 
-    for (Map.Entry<Class<?>, Set<Provider<?>>> entry : setIndex.entrySet()) {
+    for (Map.Entry<Qualified<?>, Set<Provider<?>>> entry : setIndex.entrySet()) {
       if (!lazySetMap.containsKey(entry.getKey())) {
         lazySetMap.put(entry.getKey(), LazySet.fromCollection(entry.getValue()));
       } else {
+        @SuppressWarnings("unchecked")
         LazySet<Object> existingSet = (LazySet<Object>) lazySetMap.get(entry.getKey());
         for (Provider<?> provider : entry.getValue()) {
-          runnables.add(() -> existingSet.add((Provider<Object>) provider));
+          @SuppressWarnings("unchecked")
+          Provider<Object> castedProvider = (Provider<Object>) provider;
+          runnables.add(() -> existingSet.add(castedProvider));
         }
       }
     }
@@ -229,13 +260,13 @@ public class ComponentRuntime extends AbstractComponentContainer implements Comp
 
   @Override
   @SuppressWarnings("unchecked")
-  public synchronized <T> Provider<T> getProvider(Class<T> anInterface) {
+  public synchronized <T> Provider<T> getProvider(Qualified<T> anInterface) {
     Preconditions.checkNotNull(anInterface, "Null interface requested.");
     return (Provider<T>) lazyInstanceMap.get(anInterface);
   }
 
   @Override
-  public <T> Deferred<T> getDeferred(Class<T> anInterface) {
+  public <T> Deferred<T> getDeferred(Qualified<T> anInterface) {
     Provider<T> provider = getProvider(anInterface);
     if (provider == null) {
       return OptionalProvider.empty();
@@ -248,7 +279,7 @@ public class ComponentRuntime extends AbstractComponentContainer implements Comp
 
   @Override
   @SuppressWarnings("unchecked")
-  public synchronized <T> Provider<Set<T>> setOfProvider(Class<T> anInterface) {
+  public synchronized <T> Provider<Set<T>> setOfProvider(Qualified<T> anInterface) {
     LazySet<?> provider = lazySetMap.get(anInterface);
     if (provider != null) {
       return (Provider<Set<T>>) (Provider<?>) provider;
@@ -332,32 +363,49 @@ public class ComponentRuntime extends AbstractComponentContainer implements Comp
     }
   }
 
+  @VisibleForTesting
+  Collection<Component<?>> getAllComponentsForTest() {
+    return components.keySet();
+  }
+
   public static final class Builder {
     private final Executor defaultExecutor;
     private final List<Provider<ComponentRegistrar>> lazyRegistrars = new ArrayList<>();
     private final List<Component<?>> additionalComponents = new ArrayList<>();
+    private ComponentRegistrarProcessor componentRegistrarProcessor =
+        ComponentRegistrarProcessor.NOOP;
 
     Builder(Executor defaultExecutor) {
       this.defaultExecutor = defaultExecutor;
     }
 
+    @CanIgnoreReturnValue
     public Builder addLazyComponentRegistrars(Collection<Provider<ComponentRegistrar>> registrars) {
       this.lazyRegistrars.addAll(registrars);
       return this;
     }
 
+    @CanIgnoreReturnValue
     public Builder addComponentRegistrar(ComponentRegistrar registrar) {
       this.lazyRegistrars.add(() -> registrar);
       return this;
     }
 
+    @CanIgnoreReturnValue
     public Builder addComponent(Component<?> component) {
       this.additionalComponents.add(component);
       return this;
     }
 
+    @CanIgnoreReturnValue
+    public Builder setProcessor(ComponentRegistrarProcessor processor) {
+      this.componentRegistrarProcessor = processor;
+      return this;
+    }
+
     public ComponentRuntime build() {
-      return new ComponentRuntime(defaultExecutor, lazyRegistrars, additionalComponents);
+      return new ComponentRuntime(
+          defaultExecutor, lazyRegistrars, additionalComponents, componentRegistrarProcessor);
     }
   }
 }

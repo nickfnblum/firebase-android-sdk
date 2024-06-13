@@ -14,17 +14,23 @@
 
 package com.google.firebase.crashlytics.internal.send;
 
+import android.annotation.SuppressLint;
+import android.os.SystemClock;
 import com.google.android.datatransport.Event;
+import com.google.android.datatransport.Priority;
 import com.google.android.datatransport.Transport;
+import com.google.android.datatransport.runtime.ForcedSender;
 import com.google.android.gms.tasks.TaskCompletionSource;
 import com.google.firebase.crashlytics.internal.Logger;
 import com.google.firebase.crashlytics.internal.common.CrashlyticsReportWithSessionId;
 import com.google.firebase.crashlytics.internal.common.OnDemandCounter;
+import com.google.firebase.crashlytics.internal.common.Utils;
 import com.google.firebase.crashlytics.internal.model.CrashlyticsReport;
 import com.google.firebase.crashlytics.internal.settings.Settings;
 import java.util.Locale;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
@@ -33,10 +39,12 @@ final class ReportQueue {
   private static final int MS_PER_SECOND = 1_000;
   private static final int MS_PER_MINUTE = 60_000;
   private static final int MAX_DELAY_MS = 3_600_000; // 1 hour.
+  private static final int STARTUP_DURATION_MS = 2_000; // 2 seconds.
 
   private final double ratePerMinute;
   private final double base;
   private final long stepDurationMs;
+  private final long startTimeMs;
 
   private final int queueCapacity;
   private final BlockingQueue<Runnable> queue;
@@ -57,6 +65,8 @@ final class ReportQueue {
         onDemandCounter);
   }
 
+  // TODO(b/258263226): Migrate to go/firebase-android-executors
+  @SuppressLint("ThreadPoolCreation")
   ReportQueue(
       double ratePerMinute,
       double base,
@@ -68,6 +78,8 @@ final class ReportQueue {
     this.stepDurationMs = stepDurationMs;
     this.transport = transport;
     this.onDemandCounter = onDemandCounter;
+
+    startTimeMs = SystemClock.elapsedRealtime();
 
     // The queue capacity is the per-minute rate number. // TODO(mrober): Round up to next int?
     queueCapacity = (int) ratePerMinute;
@@ -115,18 +127,39 @@ final class ReportQueue {
     }
   }
 
+  // TODO(b/258263226): Migrate to go/firebase-android-executors
+  @SuppressLint({"DiscouragedApi", "ThreadPoolCreation"}) // best effort only
+  public void flushScheduledReportsIfAble() {
+    CountDownLatch latch = new CountDownLatch(1);
+    new Thread(
+            () -> {
+              try {
+                ForcedSender.sendBlocking(transport, Priority.HIGHEST);
+              } catch (Exception ignored) {
+                // best effort only.
+              }
+              latch.countDown();
+            })
+        .start();
+    Utils.awaitUninterruptibly(latch, 2, TimeUnit.SECONDS);
+  }
+
   /** Send the report to Crashlytics through Google DataTransport. */
   private void sendReport(
       CrashlyticsReportWithSessionId reportWithSessionId,
       TaskCompletionSource<CrashlyticsReportWithSessionId> tcs) {
     Logger.getLogger()
         .d("Sending report through Google DataTransport: " + reportWithSessionId.getSessionId());
+    boolean isStartup = (SystemClock.elapsedRealtime() - startTimeMs) < STARTUP_DURATION_MS;
     transport.schedule(
         Event.ofUrgent(reportWithSessionId.getReport()),
         error -> {
           if (error != null) {
             tcs.trySetException(error);
             return;
+          }
+          if (isStartup) {
+            flushScheduledReportsIfAble();
           }
           tcs.trySetResult(reportWithSessionId);
         });

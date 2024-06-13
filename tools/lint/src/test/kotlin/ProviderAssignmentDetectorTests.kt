@@ -1,29 +1,34 @@
-// Copyright 2020 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright 2020 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package com.google.firebase.lint.checks
 
 import com.android.tools.lint.checks.infrastructure.LintDetectorTest
 
 class ProviderAssignmentDetectorTests : LintDetectorTest() {
-    override fun getDetector() = ProviderAssignmentDetector()
+  override fun getDetector() = ProviderAssignmentDetector()
 
-    override fun getIssues() = mutableListOf(
-            ProviderAssignmentDetector.INVALID_PROVIDER_ASSIGNMENT)
+  override fun getIssues() = mutableListOf(ProviderAssignmentDetector.INVALID_PROVIDER_ASSIGNMENT)
 
-    fun test_assignmentToClassField_shouldFail() {
-        lint().files(java(providerSource()), java("""
+  fun test_assignmentToClassField_shouldFail() {
+    lint()
+      .files(
+        java(providerSource()),
+        java(
+          """
             import com.google.firebase.inject.Provider;
             
             class Foo {
@@ -32,13 +37,20 @@ class ProviderAssignmentDetectorTests : LintDetectorTest() {
                 this.value = p.get();
               }
             }
-        """.trimIndent()))
-                .run()
-                .checkContains("Provider.get() assignment")
-    }
+        """
+            .trimIndent()
+        )
+      )
+      .run()
+      .checkContains("Provider.get() assignment")
+  }
 
-    fun test_assignmentAndUseOfProvider_shouldSucceed() {
-        lint().files(java(providerSource()), java("""
+  fun test_assignmentAndUseOfProvider_shouldSucceed() {
+    lint()
+      .files(
+        java(providerSource()),
+        java(
+          """
             import com.google.firebase.inject.Provider;
             
             class Foo {
@@ -50,13 +62,20 @@ class ProviderAssignmentDetectorTests : LintDetectorTest() {
                 String value = p.get();
               }
             }
-        """.trimIndent()))
-                .run()
-                .expectClean()
-    }
+        """
+            .trimIndent()
+        )
+      )
+      .run()
+      .expectClean()
+  }
 
-    fun test_assignmentFromAStoredProvider_shouldFail() {
-        lint().files(java(providerSource()), java("""
+  fun test_assignmentFromAStoredProvider_shouldFail() {
+    lint()
+      .files(
+        java(providerSource()),
+        java(
+          """
             import com.google.firebase.inject.Provider;
             
             class Foo {
@@ -69,13 +88,20 @@ class ProviderAssignmentDetectorTests : LintDetectorTest() {
                 value = p.get();
               }
             }
-        """.trimIndent()))
-                .run()
-                .checkContains("Provider.get() assignment")
-    }
+        """
+            .trimIndent()
+        )
+      )
+      .run()
+      .checkContains("Provider.get() assignment")
+  }
 
-    fun test_assignmentToLocalVariable_shouldSucceed() {
-        lint().files(java(providerSource()), java("""
+  fun test_assignmentToLocalVariable_shouldSucceed() {
+    lint()
+      .files(
+        java(providerSource()),
+        java(
+          """
             import com.google.firebase.inject.Provider;
             
             class Foo {
@@ -83,13 +109,20 @@ class ProviderAssignmentDetectorTests : LintDetectorTest() {
                 String value = p.get();
               }
             }
-        """.trimIndent()))
-                .run()
-                .expectClean()
-    }
+        """
+            .trimIndent()
+        )
+      )
+      .run()
+      .expectClean()
+  }
 
-    fun test_assignmentOfAPropertyOrMethodOfTheProvidedObject_shouldSucceed() {
-        lint().files(java(providerSource()), java("""
+  fun test_assignmentOfAPropertyOrMethodOfTheProvidedObject_shouldSucceed() {
+    lint()
+      .files(
+        java(providerSource()),
+        java(
+          """
             import com.google.firebase.inject.Provider;
 
             class Foo {
@@ -100,17 +133,22 @@ class ProviderAssignmentDetectorTests : LintDetectorTest() {
                 s = p.get().toString();
               }
             }
-        """.trimIndent()))
-                .run()
-                .expectClean()
-    }
+        """
+            .trimIndent()
+        )
+      )
+      .run()
+      .expectClean()
+  }
 
-    fun test_assignmentFromWithinADeferredApiMethod_shouldSucceed() {
-        lint().files(
-                java(providerSource()),
-                java(annotationSource()),
-                java(deferredSource()),
-                java("""
+  fun test_assignmentFromWithinADeferredApiMethod_shouldSucceed() {
+    lint()
+      .files(
+        java(providerSource()),
+        java(annotationSource()),
+        java(deferredSource()),
+        java(
+          """
                     import com.google.firebase.inject.Deferred;
                     class Foo {
                         private String s;
@@ -120,8 +158,11 @@ class ProviderAssignmentDetectorTests : LintDetectorTest() {
                           });
                         }
                     }
-                """.trimIndent()))
-                .run()
-                .expectClean()
-    }
+                """
+            .trimIndent()
+        )
+      )
+      .run()
+      .expectClean()
+  }
 }

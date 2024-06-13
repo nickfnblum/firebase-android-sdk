@@ -14,6 +14,7 @@
 
 package com.google.firebase.ml.modeldownloader.internal;
 
+import android.annotation.SuppressLint;
 import android.app.DownloadManager;
 import android.app.DownloadManager.Query;
 import android.app.DownloadManager.Request;
@@ -23,6 +24,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Build.VERSION;
 import android.os.Build.VERSION_CODES;
 import android.os.ParcelFileDescriptor;
@@ -36,7 +38,6 @@ import androidx.annotation.WorkerThread;
 import com.google.android.gms.tasks.Task;
 import com.google.android.gms.tasks.TaskCompletionSource;
 import com.google.android.gms.tasks.Tasks;
-import com.google.firebase.FirebaseApp;
 import com.google.firebase.ml.modeldownloader.CustomModel;
 import com.google.firebase.ml.modeldownloader.CustomModelDownloadConditions;
 import com.google.firebase.ml.modeldownloader.FirebaseMlException;
@@ -47,6 +48,7 @@ import java.io.FileNotFoundException;
 import java.util.Date;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import javax.inject.Inject;
 
 /**
  * Calls the Android Download service to copy the model file to device (temp location) and then
@@ -65,6 +67,7 @@ public class ModelFileDownloadService {
   private final ModelFileManager fileManager;
   private final SharedPreferencesUtil sharedPreferencesUtil;
   private final FirebaseMlLogger eventLogger;
+  private final CustomModel.Factory modelFactory;
 
   private boolean isInitialLoad;
 
@@ -82,40 +85,39 @@ public class ModelFileDownloadService {
   private CustomModelDownloadConditions downloadConditions =
       new CustomModelDownloadConditions.Builder().build();
 
-  public ModelFileDownloadService(@NonNull FirebaseApp firebaseApp) {
-    this.context = firebaseApp.getApplicationContext();
-    downloadManager = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
-    this.fileManager = ModelFileManager.getInstance(firebaseApp);
-    this.sharedPreferencesUtil = new SharedPreferencesUtil(firebaseApp);
-    this.isInitialLoad = true;
-    this.eventLogger = FirebaseMlLogger.getInstance();
+  @Inject
+  public ModelFileDownloadService(
+      Context context,
+      FirebaseMlLogger eventLogger,
+      ModelFileManager modelFileManager,
+      SharedPreferencesUtil sharedPreferencesUtil,
+      CustomModel.Factory modelFactory) {
+    this(
+        context,
+        (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE),
+        modelFileManager,
+        sharedPreferencesUtil,
+        eventLogger,
+        true,
+        modelFactory);
   }
 
   @VisibleForTesting
   ModelFileDownloadService(
-      @NonNull FirebaseApp firebaseApp,
+      Context context,
       DownloadManager downloadManager,
       ModelFileManager fileManager,
       SharedPreferencesUtil sharedPreferencesUtil,
       FirebaseMlLogger eventLogger,
-      boolean isInitialLoad) {
-    this.context = firebaseApp.getApplicationContext();
+      boolean isInitialLoad,
+      CustomModel.Factory modelFactory) {
+    this.context = context;
     this.downloadManager = downloadManager;
     this.fileManager = fileManager;
     this.sharedPreferencesUtil = sharedPreferencesUtil;
     this.eventLogger = eventLogger;
     this.isInitialLoad = isInitialLoad;
-  }
-
-  /**
-   * Get ModelFileDownloadService instance using the firebase app returned by {@link
-   * FirebaseApp#getInstance()}
-   *
-   * @return ModelFileDownloadService
-   */
-  @NonNull
-  public static ModelFileDownloadService getInstance() {
-    return FirebaseApp.getInstance().get(ModelFileDownloadService.class);
+    this.modelFactory = modelFactory;
   }
 
   public Task<Void> download(
@@ -207,12 +209,20 @@ public class ModelFileDownloadService {
     this.receiverMaps.remove(downloadId);
   }
 
+  @SuppressLint("WrongConstant")
   private Task<Void> registerReceiverForDownloadId(long downloadId, String modelName) {
     BroadcastReceiver broadcastReceiver = getReceiverInstance(downloadId, modelName);
     // It is okay to always register here. Since the broadcast receiver is the same via the lookup
     // for the same download id, the same broadcast receiver will be notified only once.
-    context.registerReceiver(
-        broadcastReceiver, new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      context.registerReceiver(
+          broadcastReceiver,
+          new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+          Context.RECEIVER_EXPORTED);
+    } else {
+      context.registerReceiver(
+          broadcastReceiver, new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+    }
 
     return getTaskCompletionSourceInstance(downloadId).getTask();
   }
@@ -291,7 +301,7 @@ public class ModelFileDownloadService {
     // update the custom model to store the download id - do not lose current local file - in case
     // this is a background update.
     CustomModel model =
-        new CustomModel(
+        modelFactory.create(
             customModel.getName(),
             customModel.getModelHash(),
             customModel.getSize(),
@@ -429,7 +439,7 @@ public class ModelFileDownloadService {
               + newModelFile.getParent());
       // Successfully moved,  update share preferences
       sharedPreferencesUtil.setLoadedCustomModelDetails(
-          new CustomModel(
+          modelFactory.create(
               model.getName(), model.getModelHash(), model.getSize(), 0, newModelFile.getPath()));
 
       maybeCleanUpOldModels();

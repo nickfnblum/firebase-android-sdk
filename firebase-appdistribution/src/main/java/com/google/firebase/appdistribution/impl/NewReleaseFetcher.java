@@ -22,68 +22,93 @@ import androidx.annotation.VisibleForTesting;
 import androidx.core.content.pm.PackageInfoCompat;
 import com.google.android.gms.tasks.Task;
 import com.google.android.gms.tasks.Tasks;
+import com.google.firebase.annotations.concurrent.Lightweight;
 import com.google.firebase.appdistribution.BinaryType;
 import com.google.firebase.appdistribution.FirebaseAppDistributionException;
 import com.google.firebase.appdistribution.FirebaseAppDistributionException.Status;
+import java.util.concurrent.Executor;
+import javax.inject.Inject;
 
 /**
  * Class that handles fetching the latest release from App Distribution and determining if it is a
  * new release.
  */
 class NewReleaseFetcher {
-  private static final String TAG = "CheckForNewReleaseClient:";
+  private static final String TAG = "NewReleaseFetcher";
 
   private final FirebaseAppDistributionTesterApiClient firebaseAppDistributionTesterApiClient;
   private final ReleaseIdentifier releaseIdentifier;
+  private final DevModeDetector devModeDetector;
+  private @Lightweight Executor lightweightExecutor;
   private final Context context;
 
-  Task<AppDistributionReleaseInternal> cachedCheckForNewRelease = null;
+  TaskCache<AppDistributionReleaseInternal> cachedCheckForNewRelease;
 
+  @Inject
   NewReleaseFetcher(
       @NonNull Context applicationContext,
       @NonNull FirebaseAppDistributionTesterApiClient firebaseAppDistributionTesterApiClient,
-      ReleaseIdentifier releaseIdentifier) {
+      ReleaseIdentifier releaseIdentifier,
+      DevModeDetector devModeDetector,
+      @Lightweight Executor lightweightExecutor) {
     this.firebaseAppDistributionTesterApiClient = firebaseAppDistributionTesterApiClient;
     this.context = applicationContext;
     this.releaseIdentifier = releaseIdentifier;
+    this.devModeDetector = devModeDetector;
+    this.lightweightExecutor = lightweightExecutor;
+    this.cachedCheckForNewRelease = new TaskCache<>(lightweightExecutor);
   }
 
   @NonNull
-  public synchronized Task<AppDistributionReleaseInternal> checkForNewRelease() {
-    if (cachedCheckForNewRelease != null && !cachedCheckForNewRelease.isComplete()) {
-      return cachedCheckForNewRelease;
+  public Task<AppDistributionReleaseInternal> checkForNewRelease() {
+    if (devModeDetector.isDevModeEnabled()) {
+      LogWrapper.w(TAG, "Not checking for new release because development mode is enabled.");
+      return Tasks.forResult(null);
     }
-
-    this.cachedCheckForNewRelease =
-        firebaseAppDistributionTesterApiClient
-            .fetchNewRelease()
-            .onSuccessTask(release -> Tasks.forResult(isNewerRelease(release) ? release : null));
-
-    return cachedCheckForNewRelease;
+    return cachedCheckForNewRelease.getOrCreateTask(
+        () ->
+            firebaseAppDistributionTesterApiClient
+                .fetchNewRelease()
+                .onSuccessTask(
+                    lightweightExecutor,
+                    release ->
+                        isNewerRelease(release)
+                            .onSuccessTask(
+                                lightweightExecutor,
+                                isNewer -> Tasks.forResult(isNewer ? release : null))));
   }
 
-  private boolean isNewerRelease(AppDistributionReleaseInternal retrievedNewRelease)
+  private Task<Boolean> isNewerRelease(AppDistributionReleaseInternal retrievedNewRelease)
       throws FirebaseAppDistributionException {
     if (retrievedNewRelease == null) {
-      LogWrapper.getInstance().v(TAG + "Tester does not have access to any releases");
-      return false;
+      LogWrapper.v(TAG, "Tester does not have access to any releases");
+      return Tasks.forResult(false);
     }
 
     long newReleaseBuildVersion = parseBuildVersion(retrievedNewRelease.getBuildVersion());
 
     if (isOlderBuildVersion(newReleaseBuildVersion)) {
-      LogWrapper.getInstance().v(TAG + "New release has lower version code than current release");
-      return false;
+      LogWrapper.v(TAG, "New release has lower version code than current release");
+      return Tasks.forResult(false);
     }
 
     if (isNewerBuildVersion(newReleaseBuildVersion)
-        || !isSameAsInstalledRelease(retrievedNewRelease)
         || hasDifferentAppVersionName(retrievedNewRelease)) {
-      return true;
-    } else {
-      LogWrapper.getInstance().v(TAG + "New release is older or is currently installed");
-      return false;
+      return Tasks.forResult(true);
     }
+
+    return hasSameBinaryIdentifier(retrievedNewRelease)
+        .onSuccessTask(
+            lightweightExecutor,
+            hasSameBinaryIdentifier -> {
+              if (hasSameBinaryIdentifier) {
+                // The release has the same app version name and binary identifier, and has either
+                // an equal or older build version
+                LogWrapper.v(TAG, "New release is older or is currently installed");
+                return Tasks.forResult(false);
+              }
+              return Tasks.forResult(true);
+            });
   }
 
   private long parseBuildVersion(String buildVersion) throws FirebaseAppDistributionException {
@@ -111,15 +136,17 @@ class NewReleaseFetcher {
   }
 
   @VisibleForTesting
-  boolean isSameAsInstalledRelease(AppDistributionReleaseInternal newRelease)
+  Task<Boolean> hasSameBinaryIdentifier(AppDistributionReleaseInternal newRelease)
       throws FirebaseAppDistributionException {
     if (newRelease.getBinaryType().equals(BinaryType.APK)) {
       return hasSameHashAsInstalledRelease(newRelease);
     }
+    return Tasks.forResult(hasSameIasArtifactId(newRelease));
+  }
 
+  boolean hasSameIasArtifactId(AppDistributionReleaseInternal newRelease) {
     if (newRelease.getIasArtifactId() == null || newRelease.getIasArtifactId().isEmpty()) {
-      LogWrapper.getInstance()
-          .w(TAG + "AAB release missing IAS Artifact ID. Assuming new release is different.");
+      LogWrapper.w(TAG, "AAB release missing IAS Artifact ID. Assuming new release is different.");
       return false;
     }
 
@@ -127,10 +154,8 @@ class NewReleaseFetcher {
     try {
       installedIasArtifactId = releaseIdentifier.extractInternalAppSharingArtifactId();
     } catch (FirebaseAppDistributionException e) {
-      LogWrapper.getInstance()
-          .w(
-              TAG + "Could not get installed IAS artifact ID. Assuming new release is different.",
-              e);
+      LogWrapper.w(
+          TAG, "Could not get installed IAS artifact ID. Assuming new release is different.", e);
       return false;
     }
 
@@ -146,12 +171,17 @@ class NewReleaseFetcher {
     return getPackageInfo(context).versionName;
   }
 
-  private boolean hasSameHashAsInstalledRelease(AppDistributionReleaseInternal newRelease)
+  private Task<Boolean> hasSameHashAsInstalledRelease(AppDistributionReleaseInternal newRelease)
       throws FirebaseAppDistributionException {
     if (newRelease.getApkHash().isEmpty()) {
-      throw new FirebaseAppDistributionException(
-          "Missing APK hash from new release", Status.UNKNOWN);
+      return Tasks.forException(
+          new FirebaseAppDistributionException(
+              "Missing APK hash from new release", Status.UNKNOWN));
     }
-    return releaseIdentifier.extractApkHash().equals(newRelease.getApkHash());
+    return releaseIdentifier
+        .extractApkHash()
+        .onSuccessTask(
+            lightweightExecutor,
+            apkHash -> Tasks.forResult(apkHash.equals(newRelease.getApkHash())));
   }
 }

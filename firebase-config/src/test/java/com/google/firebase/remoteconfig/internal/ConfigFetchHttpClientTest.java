@@ -34,6 +34,7 @@ import static com.google.firebase.remoteconfig.RemoteConfigConstants.RequestFiel
 import static com.google.firebase.remoteconfig.RemoteConfigConstants.RequestFieldKey.TIME_ZONE;
 import static com.google.firebase.remoteconfig.RemoteConfigConstants.ResponseFieldKey.ENTRIES;
 import static com.google.firebase.remoteconfig.RemoteConfigConstants.ResponseFieldKey.EXPERIMENT_DESCRIPTIONS;
+import static com.google.firebase.remoteconfig.RemoteConfigConstants.ResponseFieldKey.ROLLOUT_METADATA;
 import static com.google.firebase.remoteconfig.RemoteConfigConstants.ResponseFieldKey.STATE;
 import static com.google.firebase.remoteconfig.testutil.Assert.assertFalse;
 import static com.google.firebase.remoteconfig.testutil.Assert.assertThrows;
@@ -126,7 +127,17 @@ public class ConfigFetchHttpClientTest {
                             .put("trigger_event", "event_trigger_1")
                             .put("experiment_start_time", "2017-10-30T21:46:40Z")
                             .put("trigger_timeout", "15552000s")
-                            .put("time_to_live", "7776000s")));
+                            .put("time_to_live", "7776000s")))
+            .put(
+                ROLLOUT_METADATA,
+                new JSONArray()
+                    .put(
+                        new JSONObject()
+                            .put("rolloutId", "1")
+                            .put("variantId", "A")
+                            .put(
+                                "affectedParameterKeys",
+                                new JSONArray().put("key_1").put("key_2"))));
     noChangeResponseBody = new JSONObject().put(STATE, "NO_CHANGE");
 
     fakeHttpURLConnection =
@@ -156,18 +167,22 @@ public class ConfigFetchHttpClientTest {
         .isEqualTo(hasChangeResponseBody.getJSONObject(ENTRIES).toString());
     assertThat(response.getFetchedConfigs().getAbtExperiments().toString())
         .isEqualTo(hasChangeResponseBody.getJSONArray(EXPERIMENT_DESCRIPTIONS).toString());
+    assertThat(response.getFetchedConfigs().getRolloutMetadata().toString())
+        .isEqualTo(hasChangeResponseBody.getJSONArray(ROLLOUT_METADATA).toString());
     assertThat(response.getFetchedConfigs().getFetchTime())
         .isEqualTo(new Date(mockClock.currentTimeMillis()));
   }
 
   @Test
-  public void fetch_noChange_responseNotSet() throws Exception {
+  public void fetch_noChange_responseOnlyContainsTemplateVersion() throws Exception {
     setServerResponseTo(noChangeResponseBody, SECOND_ETAG);
 
     FetchResponse response = fetch(SECOND_ETAG);
 
     assertThat(response.getLastFetchETag()).isNull();
-    assertThat(response.getFetchedConfigs()).isNull();
+    assertThat(response.getFetchedConfigs()).isNotNull();
+    assertThat(response.getFetchedConfigs().getTemplateVersionNumber()).isNotNull();
+    assertThat(response.getFetchedConfigs().getConfigs().length()).isEqualTo(0);
   }
 
   @Test
@@ -270,21 +285,6 @@ public class ConfigFetchHttpClientTest {
 
     JSONObject requestBody = new JSONObject(fakeHttpURLConnection.getOutputStream().toString());
     assertThat(requestBody.get(LANGUAGE_CODE)).isEqualTo(languageTag);
-  }
-
-  @Test
-  @Config(sdk = Build.VERSION_CODES.KITKAT /* 19 */)
-  public void fetch_localeUsesToStringBelowLollipop() throws Exception {
-    String languageTag = "zh-Hant-TW"; // Taiwan Chinese in traditional script
-    String languageString = "zh_TW_#Hant";
-    context.getResources().getConfiguration().setLocale(Locale.forLanguageTag(languageTag));
-
-    setServerResponseTo(noChangeResponseBody, SECOND_ETAG);
-
-    fetch(FIRST_ETAG);
-
-    JSONObject requestBody = new JSONObject(fakeHttpURLConnection.getOutputStream().toString());
-    assertThat(requestBody.get(LANGUAGE_CODE)).isEqualTo(languageString);
   }
 
   @Test

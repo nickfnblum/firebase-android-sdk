@@ -19,7 +19,6 @@ import static org.mockito.Matchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import android.app.ActivityManager.RunningAppProcessInfo;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -27,7 +26,10 @@ import android.content.res.Resources;
 import android.util.Log;
 import com.google.firebase.crashlytics.internal.CrashlyticsTestCase;
 import com.google.firebase.crashlytics.internal.Logger;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class CommonUtilsTest extends CrashlyticsTestCase {
@@ -45,24 +47,6 @@ public class CommonUtilsTest extends CrashlyticsTestCase {
   }
 
   private static final String ABC_EXPECTED_HASH = "a9993e364706816aba3e25717850c26c9cd0d89d";
-
-  public void testConvertMemInfoToBytesFromKb() {
-    assertEquals(
-        1055760384,
-        CommonUtils.convertMemInfoToBytes("1031016 KB", "KB", CommonUtils.BYTES_IN_A_KILOBYTE));
-  }
-
-  public void testConvertMemInfoToBytesFromMb() {
-    assertEquals(
-        1081081856,
-        CommonUtils.convertMemInfoToBytes("1031 MB", "MB", CommonUtils.BYTES_IN_A_MEGABYTE));
-  }
-
-  public void testConvertMemInfoToBytesFromGb() {
-    assertEquals(
-        10737418240L,
-        CommonUtils.convertMemInfoToBytes("10 GB", "GB", CommonUtils.BYTES_IN_A_GIGABYTE));
-  }
 
   public void testCreateInstanceIdFromNullInput() {
     assertNull(CommonUtils.createInstanceIdFrom(((String[]) null)));
@@ -148,22 +132,10 @@ public class CommonUtilsTest extends CrashlyticsTestCase {
   }
 
   public void testGetTotalRamInBytes() {
-    final long bytes = CommonUtils.getTotalRamInBytes();
+    final long bytes = CommonUtils.calculateTotalRamInBytes(getContext());
     // can't check complete string because emulators & devices may be different.
     assertTrue(bytes > 0);
     Log.d(Logger.TAG, "testGetTotalRam: " + bytes);
-  }
-
-  public void testGetAppProcessInfo() {
-    final Context context = getContext();
-    RunningAppProcessInfo info = CommonUtils.getAppProcessInfo(context.getPackageName(), context);
-    assertNotNull(info);
-    // It is not possible to test the state of info.importance because the value is not
-    // always the same under test as it is when the sdk is running in an app. In API 21, the
-    // importance under test started returning VISIBLE instead of FOREGROUND.
-
-    info = CommonUtils.getAppProcessInfo("nonexistant.package.name", context);
-    assertNull(info);
   }
 
   public void testIsRooted() {
@@ -278,6 +250,82 @@ public class CommonUtilsTest extends CrashlyticsTestCase {
         });
   }
 
+  public void testResolveNativeBuildIds_missing_returnsEmptyList() {
+    assertNativeBuildIds(new ArrayList<BuildIdInfo>(), new HashMap<String, List<String>>());
+  }
+
+  public void testResolveNativeBuildIds_missingResourceArray_returnsEmptyList() {
+    assertNativeBuildIds(
+        new ArrayList<BuildIdInfo>(),
+        new HashMap<String, List<String>>() {
+          {
+            put(
+                CommonUtils.BUILD_IDS_LIB_NAMES_RESOURCE_NAME,
+                new ArrayList<String>(Arrays.asList("lib.so")));
+            put(
+                CommonUtils.BUILD_IDS_BUILD_ID_RESOURCE_NAME,
+                new ArrayList<String>(Arrays.asList("aabb")));
+          }
+        });
+  }
+
+  public void testResolveNativeBuildIds_returnsSingleLibrary() {
+    assertNativeBuildIds(
+        new ArrayList<BuildIdInfo>(Arrays.asList(new BuildIdInfo("lib.so", "x86", "aabb"))),
+        new HashMap<String, List<String>>() {
+          {
+            put(
+                CommonUtils.BUILD_IDS_LIB_NAMES_RESOURCE_NAME,
+                new ArrayList<String>(Arrays.asList("lib.so")));
+            put(
+                CommonUtils.BUILD_IDS_ARCH_RESOURCE_NAME,
+                new ArrayList<String>(Arrays.asList("x86")));
+            put(
+                CommonUtils.BUILD_IDS_BUILD_ID_RESOURCE_NAME,
+                new ArrayList<String>(Arrays.asList("aabb")));
+          }
+        });
+  }
+
+  public void testResolveNativeBuildIds_returnsMultipleLibrary() {
+    assertNativeBuildIds(
+        new ArrayList<BuildIdInfo>(
+            Arrays.asList(
+                new BuildIdInfo("lib.so", "x86", "aabb"),
+                new BuildIdInfo("lib.so", "x86_64", "bbaa"))),
+        new HashMap<String, List<String>>() {
+          {
+            put(
+                CommonUtils.BUILD_IDS_LIB_NAMES_RESOURCE_NAME,
+                new ArrayList<String>(Arrays.asList("lib.so", "lib.so")));
+            put(
+                CommonUtils.BUILD_IDS_ARCH_RESOURCE_NAME,
+                new ArrayList<String>(Arrays.asList("x86", "x86_64")));
+            put(
+                CommonUtils.BUILD_IDS_BUILD_ID_RESOURCE_NAME,
+                new ArrayList<String>(Arrays.asList("aabb", "bbaa")));
+          }
+        });
+  }
+
+  public void testResolveNativeBuildIds_mismatchedArray_returnsEmptyList() {
+    assertNativeBuildIds(
+        new ArrayList<BuildIdInfo>(),
+        new HashMap<String, List<String>>() {
+          {
+            put(
+                CommonUtils.BUILD_IDS_LIB_NAMES_RESOURCE_NAME,
+                new ArrayList<String>(Arrays.asList("lib.so", "lib.so")));
+            put(
+                CommonUtils.BUILD_IDS_ARCH_RESOURCE_NAME,
+                new ArrayList<String>(Arrays.asList("x86")));
+            put(
+                CommonUtils.BUILD_IDS_BUILD_ID_RESOURCE_NAME,
+                new ArrayList<String>(Arrays.asList("aabb", "baab")));
+          }
+        });
+  }
+
   private void assertBuildId(String expectedValue, Map<String, String> buildIds) {
     final Context mockContext = mock(Context.class);
     final Context mockAppContext = mock(Context.class);
@@ -301,6 +349,40 @@ public class CommonUtilsTest extends CrashlyticsTestCase {
     }
 
     assertEquals(expectedValue, CommonUtils.getMappingFileId(mockContext));
+  }
+
+  private void assertNativeBuildIds(
+      ArrayList<BuildIdInfo> expected, Map<String, List<String>> nativeBuildIds) {
+    final Context mockContext = mock(Context.class);
+    final Context mockAppContext = mock(Context.class);
+    final Resources mockResources = mock(Resources.class);
+
+    final String packageName = "package.name";
+    final ApplicationInfo info = new ApplicationInfo();
+    info.icon = 0;
+
+    when(mockContext.getResources()).thenReturn(mockResources);
+    when(mockContext.getApplicationContext()).thenReturn(mockAppContext);
+
+    when(mockAppContext.getApplicationInfo()).thenReturn(info);
+    when(mockContext.getPackageName()).thenReturn(packageName);
+
+    int id = -1;
+    when(mockResources.getIdentifier(anyString(), anyString(), anyString())).thenReturn(++id);
+    for (String buildIdKey : nativeBuildIds.keySet()) {
+      when(mockResources.getIdentifier(buildIdKey, "array", packageName)).thenReturn(++id);
+      when(mockResources.getStringArray(eq(id)))
+          .thenReturn(nativeBuildIds.get(buildIdKey).toArray(new String[] {}));
+    }
+    List<BuildIdInfo> output = CommonUtils.getBuildIdInfo(mockContext);
+    assertEquals(output.size(), expected.size());
+    for (int i = 0; i < expected.size(); i++) {
+      BuildIdInfo expectedBuildIdInfo = expected.get(i);
+      BuildIdInfo outputBuildIdInfo = output.get(i);
+      assertEquals(expectedBuildIdInfo.getLibraryName(), outputBuildIdInfo.getLibraryName());
+      assertEquals(expectedBuildIdInfo.getArch(), outputBuildIdInfo.getArch());
+      assertEquals(expectedBuildIdInfo.getBuildId(), outputBuildIdInfo.getBuildId());
+    }
   }
 
   private Context mockPermissionContext(boolean isGranted) {

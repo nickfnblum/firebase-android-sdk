@@ -14,19 +14,21 @@
 
 plugins {
     id 'firebase-library'
-    id 'kotlin-android'
+    id("kotlin-android")
 }
 
 firebaseLibrary {
-    releaseWith project(':firebase-inappmessaging-display')
-    publishJavadoc = true
+    libraryGroup "inappmessaging"
+    publishJavadoc = false
+    publishReleaseNotes = false
     publishSources = true
 }
 
 android {
-    compileSdkVersion project.targetSdkVersion
+    namespace "com.google.firebase.inappmessaging.display.ktx"
+    compileSdkVersion project.compileSdkVersion
     defaultConfig {
-        minSdkVersion 16
+        minSdkVersion project.minSdkVersion
         multiDexEnabled true
         targetSdkVersion project.targetSdkVersion
         versionName version
@@ -38,26 +40,25 @@ android {
             srcDir 'src/test/kotlin'
         }
     }
-
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
     testOptions.unitTests.includeAndroidResources = true
 }
 
 dependencies {
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlinVersion"
+    api(project(":firebase-inappmessaging"))
+    api(project(":firebase-inappmessaging-display"))
+    api("com.google.firebase:firebase-common:21.0.0")
+    api("com.google.firebase:firebase-common-ktx:21.0.0")
 
-    implementation project(':firebase-common')
-    implementation project(':firebase-components')
-    implementation project(':firebase-common:ktx')
-    implementation project(':firebase-inappmessaging')
-    implementation project(':firebase-inappmessaging:ktx')
-    implementation project(':firebase-inappmessaging-display')
-    implementation 'androidx.annotation:annotation:1.1.0'
+    implementation("com.google.firebase:firebase-components:18.0.0")
 
-    testImplementation "org.robolectric:robolectric:$robolectricVersion"
-    testImplementation 'junit:junit:4.12'
-    testImplementation "com.google.truth:truth:$googleTruthVersion"
+    testImplementation "androidx.test:core:$androidxTestCoreVersion"
     testImplementation ("com.google.firebase:firebase-analytics:17.0.0") {
-        exclude group: "com.google.firebase", module: "firebase-common"
-    }
-    testImplementation 'androidx.test:core:1.2.0'
+         exclude group: "com.google.firebase", module: "firebase-common"
+     }
+    testImplementation "com.google.truth:truth:$googleTruthVersion"
+    testImplementation 'junit:junit:4.12'
+    testImplementation "org.robolectric:robolectric:$robolectricVersion"
 }

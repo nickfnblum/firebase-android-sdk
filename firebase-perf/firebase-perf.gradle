@@ -17,10 +17,12 @@
 
 plugins {
     id 'firebase-library'
+    id("kotlin-android")
     id 'com.google.protobuf'
 }
 
 firebaseLibrary {
+    libraryGroup "perf"
     publishJavadoc = true
     // Disabling Test Lab as there are no instrumentation tests for the SDK currently.
     // When we add instrumentation tests in the future, this needs to be enabled.
@@ -41,10 +43,12 @@ protobuf {
 }
 
 android {
-    compileSdkVersion project.targetSdkVersion
+    namespace "com.google.firebase.perf"
+    compileSdk project.compileSdkVersion
 
     lintOptions {
         abortOnError true
+        baseline file("lint-baseline.xml")
     }
 
     defaultConfig {
@@ -70,7 +74,7 @@ android {
             buildConfigField("Boolean", "ENFORCE_DEFAULT_LOG_SRC", "Boolean.valueOf(true)")
         }
 
-        minSdkVersion 16
+        minSdkVersion project.minSdkVersion
         multiDexEnabled true
         targetSdkVersion project.targetSdkVersion
         versionName version
@@ -81,7 +85,7 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
-
+    kotlinOptions.jvmTarget = "1.8"
     testOptions {
         unitTests {
             includeAndroidResources = true
@@ -90,39 +94,44 @@ android {
 }
 
 dependencies {
-    // Firebase Deps
-    implementation project(':firebase-common')
-    implementation project(':firebase-components')
-    implementation project(':firebase-config')
-    implementation project(':firebase-installations-interop')
-    implementation project(':protolite-well-known-types')
+    annotationProcessor 'com.google.dagger:dagger-compiler:2.27'
+    compileOnly group: 'org.apache.httpcomponents', name: 'httpclient', version: '4.5.6'
+    implementation "androidx.annotation:annotation:1.1.0"
+    implementation "androidx.lifecycle:lifecycle-process:2.3.1"
+    implementation "com.google.android.gms:play-services-tasks:18.0.1"
     implementation "com.google.protobuf:protobuf-javalite:$javaliteVersion"
-    runtimeOnly project(':firebase-installations')
-    implementation project(':transport:transport-api')
-    runtimeOnly project(':firebase-datatransport')
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion"
+    implementation 'androidx.annotation:annotation:1.7.0'
+    implementation 'androidx.appcompat:appcompat:1.2.0'
+    implementation 'com.google.android.datatransport:transport-api:3.0.0'
+    implementation 'com.google.dagger:dagger:2.27'
+    api 'com.google.firebase:firebase-annotations:16.2.0'
+    api 'com.google.firebase:firebase-installations-interop:17.1.0'
+    api 'com.google.firebase:protolite-well-known-types:18.0.0'
+    implementation 'com.squareup.okhttp3:okhttp:3.12.1'
+    api("com.google.firebase:firebase-common:21.0.0")
+    api("com.google.firebase:firebase-common-ktx:21.0.0")
+    api("com.google.firebase:firebase-components:18.0.0")
+    api("com.google.firebase:firebase-config:21.5.0")
+    api("com.google.firebase:firebase-installations:17.2.0")
+    api("com.google.firebase:firebase-sessions:2.0.0") {
+         exclude group: 'com.google.firebase', module: 'firebase-common'
+         exclude group: 'com.google.firebase', module: 'firebase-common-ktx'
+         exclude group: 'com.google.firebase', module: 'firebase-components'
+     }
     javadocClasspath 'com.google.auto.value:auto-value-annotations:1.6.6'
     javadocClasspath 'com.google.code.findbugs:jsr305:3.0.2'
-
-    // Google Deps
-    implementation "com.google.android.gms:play-services-tasks:18.0.1"
-    implementation 'androidx.appcompat:appcompat:1.2.0'
-    implementation "androidx.annotation:annotation:1.1.0"
-
-    // 3rd Party Deps
-    implementation 'com.squareup.okhttp3:okhttp:3.12.1'
-    compileOnly group: 'org.apache.httpcomponents', name: 'httpclient', version: '4.5.6'
-    implementation 'com.google.dagger:dagger:2.27'
-    annotationProcessor 'com.google.dagger:dagger-compiler:2.27'
-
-    // Unit Test Deps
-    testImplementation 'junit:junit:4.12'
-    testImplementation 'org.mockito:mockito-core:2.28.2'
-    testImplementation 'org.mockito:mockito-inline:2.13.0'
-    testImplementation ("org.robolectric:robolectric:$robolectricVersion") {
-        exclude group: 'com.google.protobuf', module: 'protobuf-java'
-    }
+    runtimeOnly("com.google.firebase:firebase-datatransport:18.1.8") {
+         exclude group: 'com.google.firebase', module: 'firebase-common'
+         exclude group: 'com.google.firebase', module: 'firebase-components'
+     }
+    testCompileOnly "com.google.protobuf:protobuf-java:3.21.9"
+    testImplementation "androidx.test:core:$androidxTestCoreVersion"
     testImplementation "com.google.truth:truth:$googleTruthVersion"
-    testImplementation group: 'org.apache.httpcomponents', name: 'httpclient', version: '4.5.6'
-    testImplementation 'androidx.test:core:1.2.0'
+    testImplementation "org.robolectric:robolectric:$robolectricVersion"
     testImplementation 'androidx.test:rules:1.2.0'
+    testImplementation 'junit:junit:4.12'
+    testImplementation 'org.mockito:mockito-core:5.2.0'
+    testImplementation 'org.mockito:mockito-inline:5.2.0'
+    testImplementation group: 'org.apache.httpcomponents', name: 'httpclient', version: '4.5.6'
 }

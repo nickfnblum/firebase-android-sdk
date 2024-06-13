@@ -18,17 +18,20 @@ import static com.google.firebase.firestore.model.DocumentCollections.emptyDocum
 import static com.google.firebase.firestore.util.Assert.hardAssert;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import com.google.firebase.database.collection.ImmutableSortedMap;
+import com.google.firebase.firestore.core.Query;
 import com.google.firebase.firestore.model.Document;
 import com.google.firebase.firestore.model.DocumentKey;
 import com.google.firebase.firestore.model.FieldIndex.IndexOffset;
 import com.google.firebase.firestore.model.MutableDocument;
-import com.google.firebase.firestore.model.ResourcePath;
 import com.google.firebase.firestore.model.SnapshotVersion;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Set;
+import javax.annotation.Nonnull;
 
 /** In-memory cache of remote documents. */
 final class MemoryRemoteDocumentCache implements RemoteDocumentCache {
@@ -94,12 +97,16 @@ final class MemoryRemoteDocumentCache implements RemoteDocumentCache {
   }
 
   @Override
-  public Map<DocumentKey, MutableDocument> getAll(ResourcePath collection, IndexOffset offset) {
+  public Map<DocumentKey, MutableDocument> getDocumentsMatchingQuery(
+      Query query,
+      IndexOffset offset,
+      @Nonnull Set<DocumentKey> mutatedKeys,
+      @Nullable QueryContext context) {
     Map<DocumentKey, MutableDocument> result = new HashMap<>();
 
     // Documents are ordered by key, so we can use a prefix scan to narrow down the documents
     // we need to match the query against.
-    DocumentKey prefix = DocumentKey.fromPath(collection.append(""));
+    DocumentKey prefix = DocumentKey.fromPath(query.getPath().append(""));
     Iterator<Map.Entry<DocumentKey, Document>> iterator = docs.iteratorFrom(prefix);
 
     while (iterator.hasNext()) {
@@ -107,12 +114,12 @@ final class MemoryRemoteDocumentCache implements RemoteDocumentCache {
       Document doc = entry.getValue();
 
       DocumentKey key = entry.getKey();
-      if (!collection.isPrefixOf(key.getPath())) {
+      if (!query.getPath().isPrefixOf(key.getPath())) {
         // We are now scanning the next collection. Abort.
         break;
       }
 
-      if (key.getPath().length() > collection.length() + 1) {
+      if (key.getPath().length() > query.getPath().length() + 1) {
         // Exclude entries from subcollections.
         continue;
       }
@@ -122,10 +129,20 @@ final class MemoryRemoteDocumentCache implements RemoteDocumentCache {
         continue;
       }
 
+      if (!mutatedKeys.contains(doc.getKey()) && !query.matches(doc)) {
+        continue;
+      }
+
       result.put(doc.getKey(), doc.mutableCopy());
     }
 
     return result;
+  }
+
+  @Override
+  public Map<DocumentKey, MutableDocument> getDocumentsMatchingQuery(
+      Query query, IndexOffset offset, @Nonnull Set<DocumentKey> mutatedKeys) {
+    return getDocumentsMatchingQuery(query, offset, mutatedKeys, /*context*/ null);
   }
 
   Iterable<Document> getDocuments() {

@@ -23,7 +23,8 @@ import android.os.Parcelable;
 import androidx.annotation.Keep;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import com.google.android.gms.common.util.VisibleForTesting;
+import androidx.annotation.VisibleForTesting;
+
 import com.google.firebase.perf.FirebasePerformanceAttributable;
 import com.google.firebase.perf.application.AppStateMonitor;
 import com.google.firebase.perf.application.AppStateUpdateHandler;
@@ -689,8 +690,7 @@ public class Trace extends AppStateUpdateHandler
    * Describes the kinds of special objects contained in this Parcelable's marshalled
    * representation.
    *
-   * @see <a href="https://developer.android.com/reference/android/os/Parcelable.html">
-   *     https://developer.android.com/reference/android/os/Parcelable.html</a>
+   * @see Parcelable
    * @return always returns 0.
    */
   @Keep

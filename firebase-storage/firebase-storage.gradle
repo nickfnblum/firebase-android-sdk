@@ -14,10 +14,13 @@
 
 plugins {
     id 'firebase-library'
+    id("kotlin-android")
     id 'com.google.protobuf'
+    id("copy-google-services")
 }
 
 firebaseLibrary {
+    libraryGroup "storage"
     testLab.enabled = true
     publishJavadoc = true
     publishSources = true
@@ -28,7 +31,8 @@ android {
         timeOutInMs 60 * 1000
     }
 
-    compileSdkVersion project.targetSdkVersion
+    namespace "com.google.firebase.storage"
+    compileSdkVersion project.compileSdkVersion
     defaultConfig {
         targetSdkVersion project.targetSdkVersion
         minSdkVersion project.minSdkVersion
@@ -72,41 +76,46 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+    kotlinOptions { jvmTarget = "1.8" }
 }
 
 dependencies {
-    implementation project(':firebase-common')
-    implementation project(':firebase-components')
-    implementation project(':appcheck:firebase-appcheck-interop')
+    javadocClasspath 'com.google.auto.value:auto-value-annotations:1.6.6'
+    javadocClasspath 'com.google.code.findbugs:jsr305:3.0.2'
+
+    api("com.google.firebase:firebase-annotations:16.2.0")
+    api("com.google.firebase:firebase-appcheck:17.1.0") {
+        exclude group: "com.google.firebase", module: "firebase-common"
+        exclude group: "com.google.firebase", module: "firebase-components"
+        exclude group: "com.google.firebase", module: "firebase-annotations"
+    }
+    api("com.google.firebase:firebase-appcheck-interop:17.1.0")
+    api('com.google.firebase:firebase-auth-interop:18.0.0') {
+         exclude group: "com.google.firebase", module: "firebase-common"
+         exclude group: "com.google.firebase", module: "firebase-components"
+         exclude group: "com.google.firebase", module: "firebase-annotations"
+     }
+    api("com.google.firebase:firebase-common:21.0.0")
+    api("com.google.firebase:firebase-common-ktx:21.0.0")
+    api("com.google.firebase:firebase-components:18.0.0")
 
     implementation 'androidx.annotation:annotation:1.1.0'
     implementation 'com.google.android.gms:play-services-base:18.0.1'
     implementation 'com.google.android.gms:play-services-tasks:18.0.1'
-    implementation('com.google.firebase:firebase-auth-interop:18.0.0') {
-        exclude group: "com.google.firebase", module: "firebase-common"
-    }
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion"
 
-    javadocClasspath 'com.google.code.findbugs:jsr305:3.0.2'
-    javadocClasspath 'com.google.auto.value:auto-value-annotations:1.6.6'
+    testImplementation "androidx.test:core:$androidxTestCoreVersion"
+    testImplementation 'androidx.test:rules:1.2.0'
+    testImplementation "com.google.truth:truth:$googleTruthVersion"
+    testImplementation 'junit:junit:4.12'
+    testImplementation 'org.mockito:mockito-core:2.25.0'
+    testImplementation 'org.mockito:mockito-core:3.3.3'
+    testImplementation "org.robolectric:robolectric:$robolectricVersion"
 
     androidTestImplementation "androidx.annotation:annotation:1.1.0"
     androidTestImplementation 'androidx.test:rules:1.2.0'
     androidTestImplementation 'androidx.test:runner:1.2.0'
     androidTestImplementation "com.google.truth:truth:$googleTruthVersion"
     androidTestImplementation 'junit:junit:4.12'
-
-    testImplementation 'junit:junit:4.12'
-    testImplementation 'org.mockito:mockito-core:2.25.0'
-    testImplementation "org.robolectric:robolectric:$robolectricVersion"
-    testImplementation "com.google.truth:truth:$googleTruthVersion"
-    testImplementation 'androidx.test:rules:1.2.0'
-    testImplementation 'androidx.test:core:1.2.0'
-    testImplementation project(':appcheck:firebase-appcheck')
 }
-
-// ==========================================================================
-// Copy from here down if you want to use the google-services plugin in your
-// androidTest integration tests.
-// ==========================================================================
-ext.packageName = "com.google.firebase.storage"
-apply from: '../gradle/googleServices.gradle'

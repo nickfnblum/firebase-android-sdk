@@ -19,31 +19,34 @@ import com.google.common.collect.ImmutableSet;
 import com.google.firebase.gradle.plugins.ci.device.FirebaseTestLabExtension;
 import java.io.File;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 import javax.inject.Inject;
 import org.gradle.api.Action;
-import org.gradle.api.GradleException;
 import org.gradle.api.Project;
-import org.gradle.api.UnknownDomainObjectException;
 import org.gradle.api.internal.provider.DefaultProvider;
 import org.gradle.api.plugins.JavaPluginConvention;
 import org.gradle.api.provider.Property;
 import org.gradle.api.publish.maven.MavenPom;
 
+// TODO(b/270576405): rewrite in kotlin, and utilize conventions
 public class FirebaseLibraryExtension {
 
   public final Project project;
   public final LibraryType type;
-  private final Set<FirebaseLibraryExtension> librariesToCoRelease = new HashSet<>();
-
   /** Indicates whether the library has public javadoc. */
   public boolean publishJavadoc = true;
 
+  /** Indicates whether release notes are published for the library. */
+  public boolean publishReleaseNotes = true;
+
   /** Indicates whether sources are published alongside the library. */
   public boolean publishSources;
+
+  /**
+   * Indicates the library is in a preview mode (alpha, beta, ...), and must publish with a tag
+   */
+  public String previewMode = "";
 
   /** Static analysis configuration. */
   public final FirebaseStaticAnalysis staticAnalysis;
@@ -53,6 +56,8 @@ public class FirebaseLibraryExtension {
 
   public Property<String> groupId;
   public Property<String> artifactId;
+
+  String libraryGroupName;
 
   private Action<MavenPom> customizePomAction =
       pom -> {
@@ -87,11 +92,11 @@ public class FirebaseLibraryExtension {
       groupId.set(new DefaultProvider<>(() -> project.getGroup().toString()));
     }
     this.staticAnalysis = initializeStaticAnalysis(project);
+    libraryGroupName = this.artifactId.get();
   }
 
   private FirebaseStaticAnalysis initializeStaticAnalysis(Project project) {
     return new FirebaseStaticAnalysis(
-        projectsFromProperty(project, "firebase.checks.errorproneProjects"),
         projectsFromProperty(project, "firebase.checks.lintProjects"));
   }
 
@@ -113,39 +118,8 @@ public class FirebaseLibraryExtension {
    * <p>This will force the released version of the current project to match the one it's released
    * with.
    */
-  public void releaseWith(Project releaseWithProject) {
-    try {
-      FirebaseLibraryExtension releaseWithLibrary =
-          releaseWithProject.getExtensions().getByType(FirebaseLibraryExtension.class);
-      releaseWithLibrary.librariesToCoRelease.add(this);
-      this.project.setVersion(releaseWithProject.getVersion());
-
-      String latestRelease = "latestReleasedVersion";
-      if (releaseWithProject.hasProperty(latestRelease)) {
-        this.project
-            .getExtensions()
-            .getExtraProperties()
-            .set(latestRelease, releaseWithProject.property(latestRelease));
-      }
-
-    } catch (UnknownDomainObjectException ex) {
-      throw new GradleException(
-          "Library cannot be released with a project that is not a Firebase Library itself");
-    }
-  }
-
-  public Set<Project> getProjectsToRelease() {
-    return ImmutableSet.<Project>builder()
-        .add(project)
-        .addAll(librariesToCoRelease.stream().map(l -> l.project).collect(Collectors.toSet()))
-        .build();
-  }
-
-  public Set<FirebaseLibraryExtension> getLibrariesToRelease() {
-    return ImmutableSet.<FirebaseLibraryExtension>builder()
-        .add(this)
-        .addAll(librariesToCoRelease)
-        .build();
+  public void libraryGroup(String libraryGroupName) {
+    this.libraryGroupName = libraryGroupName;
   }
 
   /** Provides a hook to customize pom generation. */

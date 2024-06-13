@@ -14,18 +14,22 @@
 
 package com.google.firebase.remoteconfig;
 
+import android.app.Application;
 import android.content.Context;
 import android.content.SharedPreferences;
 import androidx.annotation.GuardedBy;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 import com.google.android.gms.common.annotation.KeepForSdk;
+import com.google.android.gms.common.api.internal.BackgroundDetector;
 import com.google.android.gms.common.util.Clock;
 import com.google.android.gms.common.util.DefaultClock;
 import com.google.android.gms.tasks.Tasks;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.abt.FirebaseABTesting;
 import com.google.firebase.analytics.connector.AnalyticsConnector;
+import com.google.firebase.annotations.concurrent.Blocking;
 import com.google.firebase.inject.Provider;
 import com.google.firebase.installations.FirebaseInstallationsApi;
 import com.google.firebase.remoteconfig.internal.ConfigCacheClient;
@@ -33,14 +37,19 @@ import com.google.firebase.remoteconfig.internal.ConfigFetchHandler;
 import com.google.firebase.remoteconfig.internal.ConfigFetchHttpClient;
 import com.google.firebase.remoteconfig.internal.ConfigGetParameterHandler;
 import com.google.firebase.remoteconfig.internal.ConfigMetadataClient;
+import com.google.firebase.remoteconfig.internal.ConfigRealtimeHandler;
 import com.google.firebase.remoteconfig.internal.ConfigStorageClient;
 import com.google.firebase.remoteconfig.internal.Personalization;
+import com.google.firebase.remoteconfig.internal.rollouts.RolloutsStateFactory;
+import com.google.firebase.remoteconfig.internal.rollouts.RolloutsStateSubscriptionsHandler;
+import com.google.firebase.remoteconfig.interop.FirebaseRemoteConfigInterop;
+import com.google.firebase.remoteconfig.interop.rollouts.RolloutsStateSubscriber;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Component for providing multiple Firebase Remote Config (FRC) instances. Firebase Android
@@ -49,11 +58,10 @@ import java.util.concurrent.Executors;
  * <p>A unique FRC instance is returned for each {{@link FirebaseApp}, {@code namespace}}
  * combination.
  *
- * @author Miraziz Yusupov
  * @hide
  */
 @KeepForSdk
-public class RemoteConfigComponent {
+public class RemoteConfigComponent implements FirebaseRemoteConfigInterop {
   /** Name of the file where activated configs are stored. */
   public static final String ACTIVATE_FILE_NAME = "activate";
   /** Name of the file where fetched configs are stored. */
@@ -74,8 +82,11 @@ public class RemoteConfigComponent {
   @GuardedBy("this")
   private final Map<String, FirebaseRemoteConfig> frcNamespaceInstances = new HashMap<>();
 
+  private static final Map<String, FirebaseRemoteConfig> frcNamespaceInstancesStatic =
+      new HashMap<>();
+
   private final Context context;
-  private final ExecutorService executorService;
+  private final ScheduledExecutorService executor;
   private final FirebaseApp firebaseApp;
   private final FirebaseInstallationsApi firebaseInstallations;
   private final FirebaseABTesting firebaseAbt;
@@ -89,13 +100,14 @@ public class RemoteConfigComponent {
   /** Firebase Remote Config Component constructor. */
   RemoteConfigComponent(
       Context context,
+      @Blocking ScheduledExecutorService executor,
       FirebaseApp firebaseApp,
       FirebaseInstallationsApi firebaseInstallations,
       FirebaseABTesting firebaseAbt,
       Provider<AnalyticsConnector> analyticsConnector) {
     this(
         context,
-        Executors.newCachedThreadPool(),
+        executor,
         firebaseApp,
         firebaseInstallations,
         firebaseAbt,
@@ -107,27 +119,28 @@ public class RemoteConfigComponent {
   @VisibleForTesting
   protected RemoteConfigComponent(
       Context context,
-      ExecutorService executorService,
+      ScheduledExecutorService executor,
       FirebaseApp firebaseApp,
       FirebaseInstallationsApi firebaseInstallations,
       FirebaseABTesting firebaseAbt,
       Provider<AnalyticsConnector> analyticsConnector,
       boolean loadGetDefault) {
     this.context = context;
-    this.executorService = executorService;
+    this.executor = executor;
     this.firebaseApp = firebaseApp;
     this.firebaseInstallations = firebaseInstallations;
     this.firebaseAbt = firebaseAbt;
     this.analyticsConnector = analyticsConnector;
 
     this.appId = firebaseApp.getOptions().getApplicationId();
+    GlobalBackgroundListener.ensureBackgroundListenerIsRegistered(context);
 
     // When the component is first loaded, it will use a cached executor.
     // The getDefault call creates race conditions in tests, where the getDefault might be executing
     // while another test has already cleared the component but hasn't gotten a new one yet.
     if (loadGetDefault) {
       // Loads the default namespace's configs from disk on App startup.
-      Tasks.call(executorService, this::getDefault);
+      Tasks.call(executor, this::getDefault);
     }
   }
 
@@ -159,20 +172,25 @@ public class RemoteConfigComponent {
       getHandler.addListener(personalization::logArmActive);
     }
 
+    RolloutsStateSubscriptionsHandler rolloutsStateSubscriptionsHandler =
+        getRolloutsStateSubscriptionsHandler(activatedCacheClient, defaultsCacheClient);
+
     return get(
         firebaseApp,
         namespace,
         firebaseInstallations,
         firebaseAbt,
-        executorService,
+        executor,
         fetchedCacheClient,
         activatedCacheClient,
         defaultsCacheClient,
         getFetchHandler(namespace, fetchedCacheClient, metadataClient),
         getHandler,
-        metadataClient);
+        metadataClient,
+        rolloutsStateSubscriptionsHandler);
   }
 
+  // TODO: Pass ConfigRealtimeHandler so it's mock-able in tests.
   @VisibleForTesting
   synchronized FirebaseRemoteConfig get(
       FirebaseApp firebaseApp,
@@ -185,7 +203,8 @@ public class RemoteConfigComponent {
       ConfigCacheClient defaultsClient,
       ConfigFetchHandler fetchHandler,
       ConfigGetParameterHandler getHandler,
-      ConfigMetadataClient metadataClient) {
+      ConfigMetadataClient metadataClient,
+      RolloutsStateSubscriptionsHandler rolloutsStateSubscriptionsHandler) {
     if (!frcNamespaceInstances.containsKey(namespace)) {
       FirebaseRemoteConfig in =
           new FirebaseRemoteConfig(
@@ -199,9 +218,19 @@ public class RemoteConfigComponent {
               defaultsClient,
               fetchHandler,
               getHandler,
-              metadataClient);
+              metadataClient,
+              getRealtime(
+                  firebaseApp,
+                  firebaseInstallations,
+                  fetchHandler,
+                  activatedClient,
+                  context,
+                  namespace,
+                  metadataClient),
+              rolloutsStateSubscriptionsHandler);
       in.startLoadingConfigsFromDisk();
       frcNamespaceInstances.put(namespace, in);
+      frcNamespaceInstancesStatic.put(namespace, in);
     }
     return frcNamespaceInstances.get(namespace);
   }
@@ -217,7 +246,7 @@ public class RemoteConfigComponent {
             "%s_%s_%s_%s.json",
             FIREBASE_REMOTE_CONFIG_FILE_NAME_PREFIX, appId, namespace, configStoreType);
     return ConfigCacheClient.getInstance(
-        Executors.newCachedThreadPool(), ConfigStorageClient.getInstance(context, fileName));
+        executor, ConfigStorageClient.getInstance(context, fileName));
   }
 
   @VisibleForTesting
@@ -239,7 +268,7 @@ public class RemoteConfigComponent {
     return new ConfigFetchHandler(
         firebaseInstallations,
         isPrimaryApp(firebaseApp) ? analyticsConnector : () -> null,
-        executorService,
+        executor,
         DEFAULT_CLOCK,
         DEFAULT_RANDOM,
         fetchedCacheClient,
@@ -248,10 +277,28 @@ public class RemoteConfigComponent {
         this.customHeaders);
   }
 
+  synchronized ConfigRealtimeHandler getRealtime(
+      FirebaseApp firebaseApp,
+      FirebaseInstallationsApi firebaseInstallations,
+      ConfigFetchHandler configFetchHandler,
+      ConfigCacheClient activatedCacheClient,
+      Context context,
+      String namespace,
+      ConfigMetadataClient metadataClient) {
+    return new ConfigRealtimeHandler(
+        firebaseApp,
+        firebaseInstallations,
+        configFetchHandler,
+        activatedCacheClient,
+        context,
+        namespace,
+        metadataClient,
+        executor);
+  }
+
   private ConfigGetParameterHandler getGetHandler(
       ConfigCacheClient activatedCacheClient, ConfigCacheClient defaultsCacheClient) {
-    return new ConfigGetParameterHandler(
-        executorService, activatedCacheClient, defaultsCacheClient);
+    return new ConfigGetParameterHandler(executor, activatedCacheClient, defaultsCacheClient);
   }
 
   @VisibleForTesting
@@ -271,6 +318,15 @@ public class RemoteConfigComponent {
       return new Personalization(analyticsConnector);
     }
     return null;
+  }
+
+  private RolloutsStateSubscriptionsHandler getRolloutsStateSubscriptionsHandler(
+      ConfigCacheClient activatedConfigsCache, ConfigCacheClient defaultConfigsCache) {
+    RolloutsStateFactory rolloutsStateFactory =
+        RolloutsStateFactory.create(activatedConfigsCache, defaultConfigsCache);
+
+    return new RolloutsStateSubscriptionsHandler(
+        activatedConfigsCache, rolloutsStateFactory, executor);
   }
 
   /**
@@ -298,5 +354,49 @@ public class RemoteConfigComponent {
    */
   private static boolean isPrimaryApp(FirebaseApp firebaseApp) {
     return firebaseApp.getName().equals(FirebaseApp.DEFAULT_APP_NAME);
+  }
+
+  private static synchronized void notifyRCInstances(boolean isInBackground) {
+    for (FirebaseRemoteConfig frc : frcNamespaceInstancesStatic.values()) {
+      frc.setConfigUpdateBackgroundState(isInBackground);
+    }
+  }
+
+  /**
+   * Register a {@link RolloutsStateSubscriber} {@code subscriber} in for the given Remote Config
+   * {@code namespace}.
+   *
+   * <p>This implements {@link FirebaseRemoteConfigInterop} for use by other Firebase SDKs. See
+   * {@link FirebaseRemoteConfigInterop#registerRolloutsStateSubscriber(String,
+   * RolloutsStateSubscriber)} for more details.
+   */
+  @Override
+  public void registerRolloutsStateSubscriber(
+      @NonNull String namespace, @NonNull RolloutsStateSubscriber subscriber) {
+    get(namespace)
+        .getRolloutsStateSubscriptionsHandler()
+        .registerRolloutsStateSubscriber(subscriber);
+  }
+
+  private static class GlobalBackgroundListener
+      implements BackgroundDetector.BackgroundStateChangeListener {
+    private static final AtomicReference<GlobalBackgroundListener> INSTANCE =
+        new AtomicReference<>();
+
+    private static void ensureBackgroundListenerIsRegistered(Context context) {
+      Application application = (Application) context.getApplicationContext();
+      if (INSTANCE.get() == null) {
+        GlobalBackgroundListener globalBackgroundListener = new GlobalBackgroundListener();
+        if (INSTANCE.compareAndSet(null, globalBackgroundListener)) {
+          BackgroundDetector.initialize(application);
+          BackgroundDetector.getInstance().addListener(globalBackgroundListener);
+        }
+      }
+    }
+
+    @Override
+    public void onBackgroundStateChanged(boolean isInBackground) {
+      notifyRCInstances(isInBackground);
+    }
   }
 }

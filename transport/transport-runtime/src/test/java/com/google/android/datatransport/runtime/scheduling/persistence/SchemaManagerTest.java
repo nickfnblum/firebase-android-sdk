@@ -28,9 +28,9 @@ import com.google.android.datatransport.runtime.TransportContext;
 import com.google.android.datatransport.runtime.time.TestClock;
 import com.google.android.datatransport.runtime.time.UptimeClock;
 import com.google.android.datatransport.runtime.util.PriorityMapping;
-import dagger.Lazy;
 import java.nio.charset.Charset;
 import java.util.Map;
+import javax.inject.Provider;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -71,7 +71,7 @@ public class SchemaManagerTest {
       EventStoreConfig.DEFAULT.toBuilder().setLoadBatchSize(5).setEventCleanUpAge(HOUR).build();
 
   private final TestClock clock = new TestClock(1);
-  private final Lazy<String> packageName =
+  private final Provider<String> packageName =
       () -> ApplicationProvider.getApplicationContext().getPackageName();
 
   @Test
@@ -123,9 +123,9 @@ public class SchemaManagerTest {
   }
 
   @Test
-  public void upgradingV3ToV4_nonEmptyDB_isLossless() {
-    int oldVersion = 3;
-    int newVersion = 4;
+  public void upgradingV4ToV7_nonEmptyDB_isLossless() {
+    int oldVersion = 4;
+    int newVersion = 7;
     SchemaManager schemaManager =
         new SchemaManager(ApplicationProvider.getApplicationContext(), DB_NAME, oldVersion);
     SQLiteEventStore store =
@@ -134,7 +134,7 @@ public class SchemaManagerTest {
     // We cannot simulate older operations with a newer client
     PersistedEvent event1 = simulatedPersistOnV1Database(schemaManager, CONTEXT1, EVENT1);
 
-    // Upgrade to V4
+    // Upgrade to V7
     schemaManager.onUpgrade(schemaManager.getWritableDatabase(), oldVersion, newVersion);
     assertThat(store.loadBatch(CONTEXT1)).containsExactly(event1);
 

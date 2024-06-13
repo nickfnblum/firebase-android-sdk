@@ -19,6 +19,7 @@ import static com.google.firebase.firestore.util.Assert.hardAssert;
 import androidx.annotation.Nullable;
 import com.google.firebase.firestore.EventListener;
 import com.google.firebase.firestore.FirebaseFirestoreException;
+import com.google.firebase.firestore.ListenSource;
 import com.google.firebase.firestore.core.DocumentViewChange.Type;
 import java.util.ArrayList;
 import java.util.List;
@@ -39,8 +40,8 @@ public class QueryListener {
   private final EventListener<ViewSnapshot> listener;
 
   /**
-   * Initial snapshots (e.g. from cache) may not be propagated to the wrapped observer. This flag is
-   * set to true once we've actually raised an event.
+   * Initial snapshots (from cache for example) may not be propagated to the wrapped observer. This
+   * flag is set to true once we've actually raised an event.
    */
   private boolean raisedInitialEvent = false;
 
@@ -57,6 +58,15 @@ public class QueryListener {
 
   public Query getQuery() {
     return query;
+  }
+
+  public boolean listensToRemoteStore() {
+    if (options != null) {
+      return !options.source.equals(ListenSource.CACHE);
+    }
+    // While not set, source should be default to ListenSource.DEFAULT, which listens to remote
+    // store.
+    return true;
   }
 
   /**
@@ -87,7 +97,8 @@ public class QueryListener {
               newSnapshot.isFromCache(),
               newSnapshot.getMutatedKeys(),
               newSnapshot.didSyncStateChange(),
-              /* excludesMetadataChanges= */ true);
+              /* excludesMetadataChanges= */ true,
+              newSnapshot.hasCachedResults());
     }
 
     if (!raisedInitialEvent) {
@@ -129,6 +140,11 @@ public class QueryListener {
       return true;
     }
 
+    // Always raise event if listening to cache
+    if (!this.listensToRemoteStore()) {
+      return true;
+    }
+
     // NOTE: We consider OnlineState.UNKNOWN as online (it should become OFFLINE
     // or ONLINE if we wait long enough).
     boolean maybeOnline = !onlineState.equals(OnlineState.OFFLINE);
@@ -139,8 +155,11 @@ public class QueryListener {
       return false;
     }
 
-    // Raise data from cache if we have any documents or we are offline
-    return !snapshot.getDocuments().isEmpty() || onlineState.equals(OnlineState.OFFLINE);
+    // Raise data from cache if we have any documents, have cached results before,
+    // or we are offline.
+    return (!snapshot.getDocuments().isEmpty()
+        || snapshot.hasCachedResults()
+        || onlineState.equals(OnlineState.OFFLINE));
   }
 
   private boolean shouldRaiseEvent(ViewSnapshot snapshot) {
@@ -171,7 +190,8 @@ public class QueryListener {
             snapshot.getDocuments(),
             snapshot.getMutatedKeys(),
             snapshot.isFromCache(),
-            snapshot.excludesMetadataChanges());
+            snapshot.excludesMetadataChanges(),
+            snapshot.hasCachedResults());
     raisedInitialEvent = true;
     listener.onEvent(snapshot, null);
   }

@@ -44,7 +44,7 @@ public class WithinAppServiceConnectionRoboTest {
   private static final String TEST_BIND_ACTION = "testBindAction";
 
   // The amount of time that a broadcast receiver takes to time out
-  private static final long RECEIVER_TIMEOUT_S = 10;
+  private static final long RECEIVER_TIMEOUT_S = 20;
 
   private Application context;
   private FakeScheduledExecutorService fakeExecutor;
@@ -66,9 +66,9 @@ public class WithinAppServiceConnectionRoboTest {
     Task<Void> pendingResult = connection.sendIntent(new Intent());
     assertThat(pendingResult.isComplete()).isFalse();
 
-    // Check the runnable doesn't run early, and that after it shuld have run the pending
+    // Check the runnable doesn't run early, and that after it should have run the pending
     // result is finished.
-    fakeExecutor.simulateNormalOperationFor(RECEIVER_TIMEOUT_S - 2, TimeUnit.SECONDS);
+    fakeExecutor.simulateNormalOperationFor(RECEIVER_TIMEOUT_S - 1, TimeUnit.SECONDS);
     assertThat(pendingResult.isComplete()).isFalse();
     fakeExecutor.simulateNormalOperationFor(1, TimeUnit.SECONDS);
     assertThat(pendingResult.isComplete()).isTrue();

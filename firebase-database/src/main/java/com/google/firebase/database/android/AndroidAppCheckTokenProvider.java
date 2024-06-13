@@ -14,21 +14,22 @@
 
 package com.google.firebase.database.android;
 
+import android.annotation.SuppressLint;
 import androidx.annotation.NonNull;
 import com.google.android.gms.tasks.Task;
 import com.google.firebase.appcheck.AppCheckTokenResult;
-import com.google.firebase.appcheck.interop.InternalAppCheckTokenProvider;
+import com.google.firebase.appcheck.interop.InteropAppCheckTokenProvider;
 import com.google.firebase.database.core.TokenProvider;
 import com.google.firebase.inject.Deferred;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class AndroidAppCheckTokenProvider implements TokenProvider {
-  private final Deferred<InternalAppCheckTokenProvider> deferredAppCheckProvider;
-  private final AtomicReference<InternalAppCheckTokenProvider> internalAppCheck;
+  private final Deferred<InteropAppCheckTokenProvider> deferredAppCheckProvider;
+  private final AtomicReference<InteropAppCheckTokenProvider> internalAppCheck;
 
   public AndroidAppCheckTokenProvider(
-      Deferred<InternalAppCheckTokenProvider> deferredAppCheckProvider) {
+      Deferred<InteropAppCheckTokenProvider> deferredAppCheckProvider) {
     this.deferredAppCheckProvider = deferredAppCheckProvider;
     this.internalAppCheck = new AtomicReference<>();
 
@@ -36,9 +37,11 @@ public class AndroidAppCheckTokenProvider implements TokenProvider {
         authProvider -> internalAppCheck.set(authProvider.get()));
   }
 
+  // TODO(b/261014172): Use an explicit executor in continuations.
+  @SuppressLint("TaskMainThread")
   @Override
   public void getToken(boolean forceRefresh, @NonNull final GetTokenCompletionListener listener) {
-    InternalAppCheckTokenProvider appCheckProvider = internalAppCheck.get();
+    InteropAppCheckTokenProvider appCheckProvider = internalAppCheck.get();
 
     if (appCheckProvider != null) {
       Task<AppCheckTokenResult> getTokenResult = appCheckProvider.getToken(forceRefresh);

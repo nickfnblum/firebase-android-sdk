@@ -19,6 +19,8 @@ import static com.google.firebase.firestore.util.Assert.hardAssert;
 import com.google.firebase.firestore.core.CompositeFilter;
 import com.google.firebase.firestore.core.FieldFilter;
 import com.google.firebase.firestore.core.Filter;
+import com.google.firebase.firestore.core.InFilter;
+import com.google.firestore.v1.Value;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -37,14 +39,14 @@ public class LogicUtils {
         "Only field filters and composite filters are accepted.");
   }
 
-  /** Returns true if the given filter is a single field filter. e.g. (a == 10). */
+  /** Returns true if the given filter is a single field filter. For example, (a == 10). */
   private static boolean isSingleFieldFilter(Filter filter) {
     return filter instanceof FieldFilter;
   }
 
   /**
-   * Returns true if the given filter is the conjunction of one or more field filters. e.g. (a == 10
-   * && b == 20)
+   * Returns true if the given filter is the conjunction of one or more field filters. For example,
+   * (a == 10 && b == 20)
    */
   private static boolean isFlatConjunction(Filter filter) {
     return filter instanceof CompositeFilter && ((CompositeFilter) filter).isFlatConjunction();
@@ -52,7 +54,7 @@ public class LogicUtils {
 
   /**
    * Returns true if the given filter is the disjunction of one or more "flat conjunctions" and
-   * field filters. e.g. (a == 10) || (b==20 && c==30)
+   * field filters. For example, (a == 10) || (b==20 && c==30)
    */
   private static boolean isDisjunctionOfFieldFiltersAndFlatConjunctions(Filter filter) {
     if (filter instanceof CompositeFilter) {
@@ -79,8 +81,8 @@ public class LogicUtils {
    */
   private static boolean isDisjunctiveNormalForm(Filter filter) {
     // A single field filter is always in DNF form.
-    // An AND of several field filters ("Flat AND") is in DNF form. e.g (A && B).
-    // An OR of field filters and "Flat AND"s is in DNF form. e.g. A || (B && C) || (D && F).
+    // An AND of several field filters ("Flat AND") is in DNF form. Example: (A && B).
+    // An OR of field filters and "Flat AND"s is in DNF form. Example: A || (B && C) || (D && F).
     // Everything else is not in DNF form.
     return isSingleFieldFilter(filter)
         || isFlatConjunction(filter)
@@ -287,6 +289,39 @@ public class LogicUtils {
   }
 
   /**
+   * The `in` filter is only a syntactic sugar over a disjunction of equalities. For instance: `a in
+   * [1,2,3]` is in fact `a==1 || a==2 || a==3`. This method expands any `in` filter in the given
+   * input into a disjunction of equality filters and returns the expanded filter.
+   */
+  protected static Filter computeInExpansion(Filter filter) {
+    assertFieldFilterOrCompositeFilter(filter);
+
+    List<Filter> expandedFilters = new ArrayList<>();
+
+    if (filter instanceof FieldFilter) {
+      if (filter instanceof InFilter) {
+        // We have reached a field filter with `in` operator.
+        for (Value value : ((InFilter) filter).getValue().getArrayValue().getValuesList()) {
+          expandedFilters.add(
+              FieldFilter.create(
+                  ((InFilter) filter).getField(), FieldFilter.Operator.EQUAL, value));
+        }
+        return new CompositeFilter(expandedFilters, CompositeFilter.Operator.OR);
+      } else {
+        // We have reached other kinds of field filters.
+        return filter;
+      }
+    }
+
+    // We have a composite filter.
+    CompositeFilter compositeFilter = (CompositeFilter) filter;
+    for (Filter subfilter : compositeFilter.getFilters()) {
+      expandedFilters.add(computeInExpansion(subfilter));
+    }
+    return new CompositeFilter(expandedFilters, compositeFilter.getOperator());
+  }
+
+  /**
    * Given a composite filter, returns the list of terms in its disjunctive normal form.
    *
    * <p>Each element in the return value is one term of the resulting DNF. For instance: For the
@@ -298,14 +333,13 @@ public class LogicUtils {
    * @return the terms in the DNF transform.
    */
   public static List<Filter> getDnfTerms(CompositeFilter filter) {
-    // TODO(orquery): write the DNF transform algorithm here.
-    // For now, assume all inputs are of the form AND(A, B, ...). Therefore the resulting DNF form
-    // is the same as the input.
     if (filter.getFilters().isEmpty()) {
       return Collections.emptyList();
     }
 
-    Filter result = computeDistributedNormalForm(filter);
+    // The `in` operator is a syntactic sugar over a disjunction of equalities. We should first
+    // replace such filters with equality filters before running the DNF transform.
+    Filter result = computeDistributedNormalForm(computeInExpansion(filter));
 
     hardAssert(
         isDisjunctiveNormalForm(result),

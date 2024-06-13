@@ -50,8 +50,8 @@ import java.util.concurrent.Executor;
 /**
  * A {@code DocumentReference} refers to a document location in a Cloud Firestore database and can
  * be used to write, read, or listen to the location. There may or may not exist a document at the
- * referenced location. A {@code DocumentReference} can also be used to create a {@link
- * CollectionReference} to a subcollection.
+ * referenced location. A {@code DocumentReference} can also be used to create a <br>
+ * {@link CollectionReference} to a subcollection.
  *
  * <p><b>Subclassing Note</b>: Cloud Firestore classes are not meant to be subclassed except for use
  * in test mocks. Subclassing is not supported in production code and new SDK releases may break
@@ -138,7 +138,7 @@ public class DocumentReference {
    * Overwrites the document referred to by this {@code DocumentReference}. If the document does not
    * yet exist, it will be created. If a document already exists, it will be overwritten.
    *
-   * @param data The data to write to the document (e.g. a Map or a POJO containing the desired
+   * @param data The data to write to the document (like a Map or a POJO containing the desired
    *     document contents).
    * @return A Task that will be resolved when the write finishes.
    */
@@ -152,7 +152,7 @@ public class DocumentReference {
    * yet exist, it will be created. If you pass {@code SetOptions}, the provided data can be merged
    * into an existing document.
    *
-   * @param data The data to write to the document (e.g. a Map or a POJO containing the desired
+   * @param data The data to write to the document (like a Map or a POJO containing the desired
    *     document contents).
    * @param options An object to configure the set behavior.
    * @return A Task that will be resolved when the write finishes.
@@ -402,7 +402,7 @@ public class DocumentReference {
    * Starts listening to the document referenced by this {@code DocumentReference} with the given
    * options.
    *
-   * @param metadataChanges Indicates whether metadata-only changes (i.e. only {@code
+   * @param metadataChanges Indicates whether metadata-only changes (specifically, only {@code
    *     DocumentSnapshot.getMetadata()} changed) should trigger snapshot events.
    * @param listener The event listener that will be called with the snapshots.
    * @return A registration object that can be used to remove the listener.
@@ -418,7 +418,7 @@ public class DocumentReference {
    * options.
    *
    * @param executor The executor to use to call the listener.
-   * @param metadataChanges Indicates whether metadata-only changes (i.e. only {@code
+   * @param metadataChanges Indicates whether metadata-only changes (specifically, only {@code
    *     DocumentSnapshot.getMetadata()} changed) should trigger snapshot events.
    * @param listener The event listener that will be called with the snapshots.
    * @return A registration object that can be used to remove the listener.
@@ -441,7 +441,7 @@ public class DocumentReference {
    * <p>The listener will be automatically removed during {@link Activity#onStop}.
    *
    * @param activity The activity to scope the listener to.
-   * @param metadataChanges Indicates whether metadata-only changes (i.e. only {@code
+   * @param metadataChanges Indicates whether metadata-only changes (specifically, only {@code
    *     DocumentSnapshot.getMetadata()} changed) should trigger snapshot events.
    * @param listener The event listener that will be called with the snapshots.
    * @return A registration object that can be used to remove the listener.
@@ -456,6 +456,28 @@ public class DocumentReference {
     checkNotNull(listener, "Provided EventListener must not be null.");
     return addSnapshotListenerInternal(
         Executors.DEFAULT_CALLBACK_EXECUTOR, internalOptions(metadataChanges), activity, listener);
+  }
+
+  /**
+   * Starts listening to the document referenced by this {@code DocumentReference} with the given
+   * options.
+   *
+   * @param options Sets snapshot listener options, including whether metadata-only changes should
+   *     trigger snapshot events, the source to listen to, the executor to use to call the listener,
+   *     or the activity to scope the listener to.
+   * @param listener The event listener that will be called with the snapshots.
+   * @return A registration object that can be used to remove the listener.
+   */
+  @NonNull
+  public ListenerRegistration addSnapshotListener(
+      @NonNull SnapshotListenOptions options, @NonNull EventListener<DocumentSnapshot> listener) {
+    checkNotNull(options, "Provided options value must not be null.");
+    checkNotNull(listener, "Provided EventListener must not be null.");
+    return addSnapshotListenerInternal(
+        options.getExecutor(),
+        internalOptions(options.getMetadataChanges(), options.getSource()),
+        options.getActivity(),
+        listener);
   }
 
   /**
@@ -541,12 +563,18 @@ public class DocumentReference {
     return com.google.firebase.firestore.core.Query.atPath(key.getPath());
   }
 
-  /** Converts the public API MetadataChanges object to the internal options object. */
+  /** Converts the public API options object to the internal options object. */
   private static ListenOptions internalOptions(MetadataChanges metadataChanges) {
+    return internalOptions(metadataChanges, ListenSource.DEFAULT);
+  }
+
+  private static ListenOptions internalOptions(
+      MetadataChanges metadataChanges, ListenSource source) {
     ListenOptions internalOptions = new ListenOptions();
     internalOptions.includeDocumentMetadataChanges = (metadataChanges == MetadataChanges.INCLUDE);
     internalOptions.includeQueryMetadataChanges = (metadataChanges == MetadataChanges.INCLUDE);
     internalOptions.waitForSyncWhenOnline = false;
+    internalOptions.source = source;
     return internalOptions;
   }
 }

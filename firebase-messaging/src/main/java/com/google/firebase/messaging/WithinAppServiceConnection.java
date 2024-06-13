@@ -15,6 +15,7 @@ package com.google.firebase.messaging;
 
 import static com.google.firebase.messaging.FirebaseMessaging.TAG;
 
+import android.annotation.SuppressLint;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -28,6 +29,7 @@ import com.google.android.gms.common.stats.ConnectionTracker;
 import com.google.android.gms.common.util.concurrent.NamedThreadFactory;
 import com.google.android.gms.tasks.Task;
 import com.google.android.gms.tasks.TaskCompletionSource;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import java.util.ArrayDeque;
 import java.util.Queue;
 import java.util.concurrent.ScheduledExecutorService;
@@ -41,10 +43,6 @@ import java.util.concurrent.TimeUnit;
  */
 class WithinAppServiceConnection implements ServiceConnection {
 
-  // Time out requests by finishing the pending result and thus unblocking the receiver after
-  // 9s to avoid causing the receiver to time out after 10s.
-  private static final int REQUEST_TIMEOUT_MS = 9000;
-
   static class BindRequest {
     final Intent intent;
     private final TaskCompletionSource<Void> taskCompletionSource = new TaskCompletionSource<>();
@@ -54,6 +52,8 @@ class WithinAppServiceConnection implements ServiceConnection {
     }
 
     void arrangeTimeout(ScheduledExecutorService executor) {
+      // Timeout after 20 seconds by finishing the Task. This will finish a background broadcast,
+      // which waits for the message to be handled.
       ScheduledFuture<?> timeoutFuture =
           executor.schedule(
               () -> {
@@ -61,11 +61,11 @@ class WithinAppServiceConnection implements ServiceConnection {
                     TAG,
                     "Service took too long to process intent: "
                         + intent.getAction()
-                        + " App may get closed.");
+                        + " finishing.");
                 finish();
               },
-              REQUEST_TIMEOUT_MS,
-              TimeUnit.MILLISECONDS);
+              EnhancedIntentService.MESSAGE_TIMEOUT_S,
+              TimeUnit.SECONDS);
 
       getTask()
           .addOnCompleteListener(
@@ -99,6 +99,8 @@ class WithinAppServiceConnection implements ServiceConnection {
   @GuardedBy("this")
   private boolean connectionInProgress = false;
 
+  // TODO(b/258424124): Migrate to go/firebase-android-executors
+  @SuppressLint("ThreadPoolCreation")
   WithinAppServiceConnection(Context context, String action) {
     // Class instances are owned by a static variable in FirebaseInstanceIdReceiver
     // and GcmReceiver so that they survive getting gc'd and reinstantiated, so use a
@@ -119,6 +121,7 @@ class WithinAppServiceConnection implements ServiceConnection {
     this.scheduledExecutorService = scheduledExecutorService;
   }
 
+  @CanIgnoreReturnValue
   synchronized Task<Void> sendIntent(Intent intent) {
     if (Log.isLoggable(TAG, Log.DEBUG)) {
       Log.d(TAG, "new intent queued in the bind-strategy delivery");

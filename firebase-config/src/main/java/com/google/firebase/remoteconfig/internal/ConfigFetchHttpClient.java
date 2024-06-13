@@ -32,7 +32,9 @@ import static com.google.firebase.remoteconfig.RemoteConfigConstants.RequestFiel
 import static com.google.firebase.remoteconfig.RemoteConfigConstants.ResponseFieldKey.ENTRIES;
 import static com.google.firebase.remoteconfig.RemoteConfigConstants.ResponseFieldKey.EXPERIMENT_DESCRIPTIONS;
 import static com.google.firebase.remoteconfig.RemoteConfigConstants.ResponseFieldKey.PERSONALIZATION_METADATA;
+import static com.google.firebase.remoteconfig.RemoteConfigConstants.ResponseFieldKey.ROLLOUT_METADATA;
 import static com.google.firebase.remoteconfig.RemoteConfigConstants.ResponseFieldKey.STATE;
+import static com.google.firebase.remoteconfig.RemoteConfigConstants.ResponseFieldKey.TEMPLATE_VERSION_NUMBER;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
 import android.content.Context;
@@ -215,12 +217,12 @@ public class ConfigFetchHttpClient {
       } catch (IOException e) {
       }
     }
+    ConfigContainer fetchedConfigs = extractConfigs(fetchResponse, currentTime);
 
     if (!backendHasUpdates(fetchResponse)) {
-      return FetchResponse.forBackendHasNoUpdates(currentTime);
+      return FetchResponse.forBackendHasNoUpdates(currentTime, fetchedConfigs);
     }
 
-    ConfigContainer fetchedConfigs = extractConfigs(fetchResponse, currentTime);
     return FetchResponse.forBackendUpdatesFetched(fetchedConfigs, fetchResponseETag);
   }
 
@@ -413,7 +415,7 @@ public class ConfigFetchHttpClient {
         // Do nothing if entries do not exist.
       }
       if (entries != null) {
-        containerBuilder.replaceConfigsWith(entries);
+        containerBuilder = containerBuilder.replaceConfigsWith(entries);
       }
 
       JSONArray experimentDescriptions = null;
@@ -423,7 +425,7 @@ public class ConfigFetchHttpClient {
         // Do nothing if entries do not exist.
       }
       if (experimentDescriptions != null) {
-        containerBuilder.withAbtExperiments(experimentDescriptions);
+        containerBuilder = containerBuilder.withAbtExperiments(experimentDescriptions);
       }
 
       JSONObject personalizationMetadata = null;
@@ -433,7 +435,26 @@ public class ConfigFetchHttpClient {
         // Do nothing if personalizationMetadata does not exist.
       }
       if (personalizationMetadata != null) {
-        containerBuilder.withPersonalizationMetadata(personalizationMetadata);
+        containerBuilder = containerBuilder.withPersonalizationMetadata(personalizationMetadata);
+      }
+
+      String templateVersionNumber = null;
+      if (fetchResponse.has(TEMPLATE_VERSION_NUMBER)) {
+        templateVersionNumber = fetchResponse.getString(TEMPLATE_VERSION_NUMBER);
+      }
+
+      if (templateVersionNumber != null) {
+        containerBuilder.withTemplateVersionNumber(Long.parseLong(templateVersionNumber));
+      }
+
+      JSONArray rolloutMetadata = null;
+      try {
+        rolloutMetadata = fetchResponse.getJSONArray(ROLLOUT_METADATA);
+      } catch (JSONException e) {
+        // Do nothing if rolloutMetadata does not exist.
+      }
+      if (rolloutMetadata != null) {
+        containerBuilder = containerBuilder.withRolloutMetadata(rolloutMetadata);
       }
 
       return containerBuilder.build();

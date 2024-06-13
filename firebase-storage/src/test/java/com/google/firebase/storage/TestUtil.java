@@ -115,6 +115,12 @@ public class TestUtil {
             System.err.println("New:");
             System.err.println(contents);
           }
+          if (!originalLine.equals(newLine)) {
+            System.err.println("Original:");
+            System.err.println(baselineContents);
+            System.err.println("New:");
+            System.err.println(contents);
+          }
           Assert.assertEquals("line:" + line + " is different.", originalLine, newLine);
         }
         line++;
@@ -144,10 +150,10 @@ public class TestUtil {
   }
 
   /**
-   * Awaits for a Task for 3 seconds, but flushes the Robolectric scheduler to allow newly added
+   * Awaits for a Task for 10 seconds, but flushes the Robolectric scheduler to allow newly added
    * Tasks to be executed.
    */
   static void await(Task<?> task) throws InterruptedException {
-    await(task, 3, TimeUnit.SECONDS);
+    await(task, 10, TimeUnit.SECONDS);
   }
 }

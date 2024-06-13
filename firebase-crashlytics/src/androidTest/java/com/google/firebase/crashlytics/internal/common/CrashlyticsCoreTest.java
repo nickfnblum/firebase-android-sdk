@@ -33,6 +33,7 @@ import com.google.firebase.crashlytics.internal.CrashlyticsNativeComponent;
 import com.google.firebase.crashlytics.internal.CrashlyticsNativeComponentDeferredProxy;
 import com.google.firebase.crashlytics.internal.CrashlyticsTestCase;
 import com.google.firebase.crashlytics.internal.DevelopmentPlatformProvider;
+import com.google.firebase.crashlytics.internal.RemoteConfigDeferredProxy;
 import com.google.firebase.crashlytics.internal.analytics.UnavailableAnalyticsEventLogger;
 import com.google.firebase.crashlytics.internal.breadcrumbs.BreadcrumbHandler;
 import com.google.firebase.crashlytics.internal.breadcrumbs.BreadcrumbSource;
@@ -44,7 +45,9 @@ import com.google.firebase.crashlytics.internal.settings.SettingsController;
 import com.google.firebase.crashlytics.internal.settings.TestSettings;
 import com.google.firebase.inject.Deferred;
 import com.google.firebase.installations.FirebaseInstallationsApi;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.mockito.Mockito;
@@ -343,10 +346,13 @@ public class CrashlyticsCoreTest extends CrashlyticsTestCase {
     when(mockSettingsController.getSettingsSync()).thenReturn(settings);
     when(mockSettingsController.getSettingsAsync()).thenReturn(Tasks.forResult(settings));
 
+    List<BuildIdInfo> buildIdInfoList = new ArrayList<>();
+    buildIdInfoList.add(new BuildIdInfo("lib.so", "x86", "aabb"));
     AppData appData =
         new AppData(
             GOOGLE_APP_ID,
             "buildId",
+            buildIdInfoList,
             "installerPackageName",
             "packageName",
             "versionCode",
@@ -421,7 +427,9 @@ public class CrashlyticsCoreTest extends CrashlyticsTestCase {
               breadcrumbSource,
               new UnavailableAnalyticsEventLogger(),
               new FileStore(context),
-              new SameThreadExecutorService());
+              new SameThreadExecutorService(),
+              mock(CrashlyticsAppQualitySessionsSubscriber.class),
+              mock(RemoteConfigDeferredProxy.class));
       return crashlyticsCore;
     }
   }

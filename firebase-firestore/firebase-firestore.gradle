@@ -14,10 +14,13 @@
 
 plugins {
     id 'firebase-library'
+    id("kotlin-android")
     id 'com.google.protobuf'
+    id("copy-google-services")
 }
 
 firebaseLibrary {
+    libraryGroup "firestore"
     publishSources = true
     testLab {
         enabled = true
@@ -49,27 +52,41 @@ protobuf {
         }
     }
 }
+
 android {
     adbOptions {
         timeOutInMs 60 * 1000
     }
 
-    compileSdkVersion project.targetSdkVersion
+    namespace "com.google.firebase.firestore"
+    compileSdkVersion project.compileSdkVersion
     defaultConfig {
         targetSdkVersion project.targetSdkVersion
-        minSdkVersion 19
+        minSdkVersion project.minSdkVersion
         versionName version
         multiDexEnabled true
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles 'proguard.txt'
+
+        // Acceptable values are: 'emulator', 'qa', 'nightly', and 'prod'.
+        def targetBackend = findProperty("targetBackend") ?: "emulator"
+        buildConfigField("String", "TARGET_BACKEND", "\"$targetBackend\"")
+
+        def targetDatabaseId = findProperty('targetDatabaseId') ?: "(default)"
+        buildConfigField("String", "TARGET_DATABASE_ID", "\"$targetDatabaseId\"")
+
+        def localProps = new Properties()
+
+        try {
+            file("local.properties").withInputStream { localProps.load(it) }
+        } catch (FileNotFoundException e) {
+        }
     }
 
     sourceSets {
         main {
             proto {
                 srcDir 'src/proto'
-            }
-            java {
             }
         }
         test {
@@ -88,97 +105,74 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+    kotlinOptions { jvmTarget = "1.8" }
     testOptions.unitTests.includeAndroidResources = true
-    ext.useProdBackendForTests = false
+
 }
 
 tasks.withType(Test) {
     maxParallelForks = Runtime.runtime.availableProcessors().intdiv(2) ?: 1
 }
 
-android.libraryVariants.all { variant ->
-    if (findProperty("useProdBackendForTests")) {
-        variant.buildConfigField("boolean", "USE_EMULATOR_FOR_TESTS", "false")
-    } else {
-        variant.buildConfigField("boolean", "USE_EMULATOR_FOR_TESTS", "true")
-    }
-
-    def localProps = new Properties()
-
-    try {
-    file("local.properties").withInputStream { localProps.load(it) }
-    } catch (FileNotFoundException e) {
-    }
-}
-
-configurations.all {
-    if(it.name.contains('AndroidTestRuntimeClasspath')) {
-        it.resolutionStrategy {
-            force 'org.checkerframework:checker-compat-qual:2.5.5'
-            force 'com.google.guava:guava:30.1.1-android'
-        }
-    }
-    exclude group: "com.google.protobuf", module: "protobuf-java"
-}
-
-googleJavaFormat {
-    exclude 'src/testUtil/java/com/google/firebase/firestore/testutil/Assert.java'
-    exclude 'src/testUtil/java/com/google/firebase/firestore/testutil/ThrowingRunnable.java'
-}
-
 dependencies {
-    implementation project(':firebase-annotations')
-    implementation project(':firebase-common')
-    implementation project(':protolite-well-known-types')
-    implementation project(':firebase-database-collection')
-    implementation project(':firebase-components')
-    implementation project(':appcheck:firebase-appcheck-interop')
-
-    //To provide @Generated annotations
-    compileOnly 'javax.annotation:jsr250-api:1.0'
-
     javadocClasspath 'com.google.auto.value:auto-value-annotations:1.6.6'
 
-    implementation 'androidx.annotation:annotation:1.1.0'
-    implementation "io.grpc:grpc-stub:$grpcVersion"
-    implementation "io.grpc:grpc-protobuf-lite:$grpcVersion"
-    implementation "io.grpc:grpc-okhttp:$grpcVersion"
-    implementation "io.grpc:grpc-android:$grpcVersion"
-    implementation 'com.google.android.gms:play-services-basement:18.0.0'
-    implementation 'com.google.android.gms:play-services-tasks:18.0.1'
-    implementation 'com.google.android.gms:play-services-base:18.0.1'
-
-    implementation 'com.squareup.okhttp:okhttp:2.7.5'
-    implementation('com.google.firebase:firebase-auth-interop:19.0.2') {
+    api project(':protolite-well-known-types')
+    api 'com.google.android.gms:play-services-tasks:18.0.1'
+    api 'com.google.firebase:firebase-annotations:16.2.0'
+    api 'com.google.firebase:firebase-appcheck-interop:17.0.0'
+    api('com.google.firebase:firebase-auth-interop:19.0.2') {
         exclude group: "com.google.firebase", module: "firebase-common"
     }
 
+    api("com.google.firebase:firebase-common:21.0.0")
+    api("com.google.firebase:firebase-common-ktx:21.0.0")
+    api("com.google.firebase:firebase-components:18.0.0")
+    api('com.google.firebase:firebase-database-collection:18.0.1')
+
+    implementation 'androidx.annotation:annotation:1.1.0'
+    implementation 'com.google.android.gms:play-services-base:18.0.1'
+    implementation 'com.google.android.gms:play-services-basement:18.1.0'
+    implementation "io.grpc:grpc-android:$grpcVersion"
+    implementation "io.grpc:grpc-okhttp:$grpcVersion"
+    implementation "io.grpc:grpc-protobuf-lite:$grpcVersion"
+    implementation "io.grpc:grpc-stub:$grpcVersion"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlinVersion"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion"
+
     compileOnly 'com.google.auto.value:auto-value-annotations:1.6.6'
-    androidTestAnnotationProcessor 'com.google.auto.value:auto-value:1.6.5'
+    compileOnly 'javax.annotation:jsr250-api:1.0'
+
     annotationProcessor 'com.google.auto.value:auto-value:1.6.5'
 
+    androidTestAnnotationProcessor 'com.google.auto.value:auto-value:1.6.5'
+
+    testImplementation project(':firebase-database-collection')
+    testImplementation project(':firebase-firestore')
+    testImplementation "androidx.test:core:$androidxTestCoreVersion"
+    testImplementation 'com.fasterxml.jackson.core:jackson-databind:2.9.8'
+    testImplementation 'com.google.android.gms:play-services-tasks:18.0.1'
+    testImplementation 'com.google.guava:guava-testlib:12.0-rc2'
+    testImplementation "com.google.truth:truth:$googleTruthVersion"
+    testImplementation 'junit:junit:4.12'
     testImplementation 'junit:junit:4.13.2'
-    testImplementation 'androidx.test:core:1.2.0'
     testImplementation "org.hamcrest:hamcrest-junit:2.0.0.0"
     testImplementation 'org.mockito:mockito-core:2.25.0'
-    testImplementation ("org.robolectric:robolectric:4.8.1") {
-        exclude group: 'com.google.protobuf', module: 'protobuf-java'
-    }
-    testImplementation "com.google.truth:truth:$googleTruthVersion"
-    testImplementation 'com.fasterxml.jackson.core:jackson-databind:2.9.8'
-    testImplementation 'com.google.guava:guava-testlib:12.0-rc2'
+    testImplementation "org.robolectric:robolectric:$robolectricVersion"
 
-    androidTestImplementation 'junit:junit:4.13.2'
-    androidTestImplementation("com.google.truth:truth:$googleTruthVersion"){
+    testCompileOnly "com.google.protobuf:protobuf-java:$protocVersion"
+
+    androidTestImplementation "androidx.annotation:annotation:1.1.0"
+    androidTestImplementation 'androidx.test:rules:1.5.0'
+    androidTestImplementation 'androidx.test:runner:1.5.2'
+    androidTestImplementation "androidx.test.ext:junit:$androidxTestJUnitVersion"
+    androidTestImplementation 'com.fasterxml.jackson.core:jackson-databind:2.9.8'
+    androidTestImplementation("com.google.truth:truth:$googleTruthVersion") {
         exclude group: "org.codehaus.mojo", module: "animal-sniffer-annotations"
     }
-    androidTestImplementation 'org.mockito:mockito-core:2.25.0'
+    androidTestImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'org.mockito:mockito-android:2.25.0'
-    androidTestImplementation 'com.fasterxml.jackson.core:jackson-databind:2.9.8'
-    androidTestImplementation "androidx.annotation:annotation:1.1.0"
-    androidTestImplementation 'androidx.test:runner:1.2.0'
-    androidTestImplementation 'androidx.test:rules:1.2.0'
-    androidTestImplementation 'androidx.test.ext:junit:1.1.1'
+    androidTestImplementation 'org.mockito:mockito-core:2.25.0'
 }
 
 gradle.projectsEvaluated {
@@ -189,10 +183,3 @@ gradle.projectsEvaluated {
         options.compilerArgs << "-Xlint:deprecation" // << "-Werror"
     }
 }
-
-// ==========================================================================
-// Copy from here down if you want to use the google-services plugin in your
-// androidTest integration tests.
-// ==========================================================================
-ext.packageName = "com.google.firebase.firestore"
-apply from: '../gradle/googleServices.gradle'

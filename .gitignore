@@ -12,3 +12,10 @@ firebase-crashlytics-ndk/.cxx/
 smoke-test-logs/
 smoke-tests/build-debug-headGit-smoke-test
 smoke-tests/firehorn.log
+macrobenchmark-output.json
+
+# generated Terraform docs
+.terraform/*
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*

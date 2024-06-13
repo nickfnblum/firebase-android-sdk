@@ -60,8 +60,8 @@ public class FirebaseAppDistributionException extends FirebaseException {
 
     /**
      * An update was not available for the current tester and app. Make sure that {@link
-     * FirebaseAppDistribution#checkForNewRelease} returns with a non-null {@link
-     * AppDistributionRelease} before calling {@link FirebaseAppDistribution#updateApp},
+     * FirebaseAppDistribution#checkForNewRelease} returns with a non-null <br>
+     * {@link AppDistributionRelease} before calling {@link FirebaseAppDistribution#updateApp}
      */
     UPDATE_NOT_AVAILABLE,
 
@@ -79,6 +79,17 @@ public class FirebaseAppDistributionException extends FirebaseException {
      * com.google.firebase:firebase-appdistribution}.
      */
     NOT_IMPLEMENTED,
+
+    /**
+     * The Firebase App Distribution Tester API is disabled for this project.
+     *
+     * <p>Before you use the App Distribution SDK in your app, you must enable the API in the Google
+     * Cloud console. For more information, see the <a
+     * href="https://firebase.google.com/docs/app-distribution/set-up-alerts?platform=android">documentation</a>.
+     * If you enabled this API recently, wait a few minutes for the action to propagate to the App
+     * Distribution systems, and retry.
+     */
+    API_DISABLED,
   }
 
   @NonNull private final Status status;

@@ -394,8 +394,8 @@ public final class LocalStore implements BundleCallback {
 
   /**
    * Updates the "ground-state" (remote) documents. We assume that the remote event reflects any
-   * write batches that have been acknowledged or rejected (i.e. we do not re-apply local mutations
-   * to updates from this event).
+   * write batches that have been acknowledged or rejected (specifically, we do not re-apply local
+   * mutations to updates from this event).
    *
    * <p>LocalDocuments are re-calculated if there are remaining mutations in the queue.
    */
@@ -425,7 +425,7 @@ public final class LocalStore implements BundleCallback {
             targetCache.addMatchingKeys(change.getAddedDocuments(), targetId);
 
             TargetData newTargetData = oldTargetData.withSequenceNumber(sequenceNumber);
-            if (remoteEvent.getTargetMismatches().contains(targetId)) {
+            if (remoteEvent.getTargetMismatches().containsKey(targetId)) {
               newTargetData =
                   newTargetData
                       .withResumeToken(ByteString.EMPTY, SnapshotVersion.NONE)
@@ -555,7 +555,7 @@ public final class LocalStore implements BundleCallback {
    * have to be too frequent.
    */
   private static boolean shouldPersistTargetData(
-      TargetData oldTargetData, TargetData newTargetData, TargetChange change) {
+      TargetData oldTargetData, TargetData newTargetData, @Nullable TargetChange change) {
     // Always persist query data if we don't already have a resume token.
     if (oldTargetData.getResumeToken().isEmpty()) return true;
 
@@ -568,10 +568,20 @@ public final class LocalStore implements BundleCallback {
     long timeDelta = newSeconds - oldSeconds;
     if (timeDelta >= RESUME_TOKEN_MAX_AGE_SECONDS) return true;
 
+    // Update the target cache if sufficient time has passed since the last
+    // LastLimboFreeSnapshotVersion
+    long newLimboFreeSeconds =
+        newTargetData.getLastLimboFreeSnapshotVersion().getTimestamp().getSeconds();
+    long oldLimboFreeSeconds =
+        oldTargetData.getLastLimboFreeSnapshotVersion().getTimestamp().getSeconds();
+    long limboFreeTimeDelta = newLimboFreeSeconds - oldLimboFreeSeconds;
+    if (limboFreeTimeDelta >= RESUME_TOKEN_MAX_AGE_SECONDS) return true;
+
     // Otherwise if the only thing that has changed about a target is its resume token it's not
     // worth persisting. Note that the RemoteStore keeps an in-memory view of the currently active
     // targets which includes the current resume token, so stream failure or user changes will still
     // use an up-to-date resume token regardless of what we do here.
+    if (change == null) return false;
     int changes =
         change.getAddedDocuments().size()
             + change.getModifiedDocuments().size()
@@ -606,6 +616,10 @@ public final class LocalStore implements BundleCallback {
               TargetData updatedTargetData =
                   targetData.withLastLimboFreeSnapshotVersion(lastLimboFreeSnapshotVersion);
               queryDataByTarget.put(targetId, updatedTargetData);
+
+              if (shouldPersistTargetData(targetData, updatedTargetData, /*change*/ null)) {
+                targetCache.updateTargetData(updatedTargetData);
+              }
             }
           }
         });
@@ -786,6 +800,14 @@ public final class LocalStore implements BundleCallback {
               indexManager::addFieldIndex,
               indexManager::deleteFieldIndex);
         });
+  }
+
+  public void deleteAllFieldIndexes() {
+    persistence.runTransaction("Delete All Indexes", () -> indexManager.deleteAllFieldIndexes());
+  }
+
+  public void setIndexAutoCreationEnabled(boolean isEnabled) {
+    queryEngine.setIndexAutoCreationEnabled(isEnabled);
   }
 
   /** Mutable state for the transaction in allocateQuery. */

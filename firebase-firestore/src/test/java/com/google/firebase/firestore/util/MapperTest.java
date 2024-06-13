@@ -21,6 +21,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.fail;
 
+import androidx.annotation.Nullable;
 import com.google.firebase.firestore.DocumentId;
 import com.google.firebase.firestore.DocumentReference;
 import com.google.firebase.firestore.Exclude;
@@ -904,6 +905,22 @@ public class MapperTest {
     @Override
     public void setValue(String value) {
       this.value = "subsetter:" + value;
+    }
+  }
+
+  private static class GenericExcludedSetterBean implements GenericInterface<String> {
+    private String value = null;
+
+    @Nullable
+    @Override
+    public String getValue() {
+      return value;
+    }
+
+    @Exclude
+    @Override
+    public void setValue(@Nullable String value) {
+      this.value = "wrong setter";
     }
   }
 
@@ -1883,16 +1900,14 @@ public class MapperTest {
   @Test
   public void passingInListTopLevelThrows() {
     assertExceptionContains(
-        "Class java.util.List has generic type parameters, please use GenericTypeIndicator "
-            + "instead",
+        "Class java.util.List has generic type parameters",
         () -> convertToCustomClass(Collections.singletonList("foo"), List.class));
   }
 
   @Test
   public void passingInMapTopLevelThrows() {
     assertExceptionContains(
-        "Class java.util.Map has generic type parameters, please use GenericTypeIndicator "
-            + "instead",
+        "Class java.util.Map has generic type parameters",
         () -> convertToCustomClass(Collections.singletonMap("foo", "bar"), Map.class));
   }
 
@@ -1920,7 +1935,7 @@ public class MapperTest {
   public void passingInGenericBeanTopLevelThrows() {
     assertExceptionContains(
         "Class com.google.firebase.firestore.util.MapperTest$GenericBean has generic type "
-            + "parameters, please use GenericTypeIndicator instead",
+            + "parameters",
         () -> deserialize("{'value': 'foo'}", GenericBean.class));
   }
 
@@ -2220,18 +2235,27 @@ public class MapperTest {
         () -> serialize(bean));
   }
 
-  // This should work, but generics and subclassing are tricky to get right. For now we will just
-  // throw and we can add support for generics & subclassing if it becomes a high demand feature
   @Test
-  public void settersCanOverrideGenericSettersParsingNot() {
-    assertExceptionContains(
-        "Class com.google.firebase.firestore.util.MapperTest$NonConflictingGenericSetterSubBean "
-            + "has multiple setter overloads",
-        () -> {
-          NonConflictingGenericSetterSubBean bean =
-              deserialize("{'value': 'value'}", NonConflictingGenericSetterSubBean.class);
-          assertEquals("subsetter:value", bean.value);
-        });
+  public void settersCanOverrideGenericSettersParsing() {
+    NonConflictingGenericSetterSubBean bean =
+        deserialize("{'value': 'value'}", NonConflictingGenericSetterSubBean.class);
+    assertEquals("subsetter:value", bean.value);
+  }
+
+  @Test
+  public void excludedOverriddenGenericSetterSetsValueNotJava() {
+    GenericExcludedSetterBean bean =
+        deserialize("{'value': 'foo'}", GenericExcludedSetterBean.class);
+    assertEquals("foo", bean.value);
+  }
+
+  // Unlike Java, in Kotlin, annotations do not get propagated to bridge methods.
+  // That's why there are 2 separate tests for Java and Kotlin
+  @Test
+  public void excludedOverriddenGenericSetterSetsValueNotKotlin() {
+    GenericExcludedSetterBeanKotlin bean =
+        deserialize("{'value': 'foo'}", GenericExcludedSetterBeanKotlin.class);
+    assertEquals("foo", bean.getValue());
   }
 
   @Test

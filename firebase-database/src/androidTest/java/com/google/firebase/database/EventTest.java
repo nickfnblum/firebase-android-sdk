@@ -264,6 +264,7 @@ public class EventTest {
     ZombieVerifier.verifyRepoZombies(refs);
   }
 
+  // TODO(mtewani): This test can be flaky. It should be rewritten to ensure stability.
   @Test
   public void setMultipleEventListenersOnSameNode() throws DatabaseException, InterruptedException {
     List<DatabaseReference> refs = IntegrationTestHelpers.getRandomNode(2);
@@ -281,6 +282,9 @@ public class EventTest {
     ZombieVerifier.verifyRepoZombies(refs);
 
     writer.setValue(42);
+
+    IntegrationTestHelpers.waitForRoundtrip(reader);
+    IntegrationTestHelpers.waitForRoundtrip(writer);
     assertTrue(writeHelper.waitForEvents());
     assertTrue(writeHelper2.waitForEvents());
     assertTrue(readHelper.waitForEvents());
@@ -1070,6 +1074,7 @@ public class EventTest {
     ZombieVerifier.verifyRepoZombies(ref);
   }
 
+  // TODO(mtewani): This test can be flaky. It should be rewritten to ensure stability.
   @Test
   public void priorityChangeShouldRaiseChildMovedAndChildChangedAndValueOnParentAndChild2()
       throws DatabaseException, InterruptedException {

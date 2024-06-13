@@ -18,6 +18,7 @@ import androidx.annotation.VisibleForTesting;
 import com.google.firebase.abt.AbtException;
 import com.google.firebase.abt.AbtExperimentInfo;
 import com.google.firebase.abt.FirebaseABTesting;
+import com.google.firebase.annotations.concurrent.Blocking;
 import com.google.firebase.inappmessaging.ExperimentPayloadProto;
 import com.google.firebase.inappmessaging.internal.injection.scopes.FirebaseAppScope;
 import com.google.internal.firebase.inappmessaging.v1.CampaignProto;
@@ -25,19 +26,18 @@ import com.google.internal.firebase.inappmessaging.v1.sdkserving.FetchEligibleCa
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
 import javax.inject.Inject;
 
 /** @hide */
 @FirebaseAppScope
 public class AbtIntegrationHelper {
   private final FirebaseABTesting abTesting;
-
-  @VisibleForTesting Executor executor = Executors.newSingleThreadExecutor();
+  @VisibleForTesting Executor executor;
 
   @Inject
-  public AbtIntegrationHelper(FirebaseABTesting abTesting) {
+  public AbtIntegrationHelper(FirebaseABTesting abTesting, @Blocking Executor blockingExecutor) {
     this.abTesting = abTesting;
+    this.executor = blockingExecutor;
   }
 
   /**

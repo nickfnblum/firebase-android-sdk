@@ -18,6 +18,7 @@ plugins {
 
 firebaseLibrary {
     publishJavadoc = false
+    publishReleaseNotes = false
     publishSources = true
 }
 
@@ -26,7 +27,8 @@ android {
         timeOutInMs 60 * 1000
     }
 
-    compileSdkVersion project.targetSdkVersion
+    namespace "com.google.firebase.datatransport"
+    compileSdkVersion project.compileSdkVersion
     defaultConfig {
         minSdkVersion project.minSdkVersion
         targetSdkVersion project.targetSdkVersion
@@ -37,6 +39,7 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+
     testOptions {
         unitTests {
             includeAndroidResources = true
@@ -45,16 +48,18 @@ android {
 }
 
 dependencies {
-    implementation project(':firebase-common')
-    implementation project(':firebase-components')
-    implementation project(':transport:transport-api')
-    implementation project(':transport:transport-runtime')
-    implementation project(':transport:transport-backend-cct')
-    implementation 'androidx.annotation:annotation:1.1.0'
+    api 'com.google.firebase:firebase-common:21.0.0'
+    api 'com.google.firebase:firebase-components:18.0.0'
 
+    implementation 'androidx.annotation:annotation:1.1.0'
+    implementation 'com.google.android.datatransport:transport-api:3.1.0'
+    implementation 'com.google.android.datatransport:transport-backend-cct:3.2.0'
+    implementation 'com.google.android.datatransport:transport-runtime:3.2.0'
+    implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22")
+
+    testImplementation "androidx.test:core:$androidxTestCoreVersion"
     testImplementation 'androidx.test:runner:1.2.0'
-    testImplementation "org.robolectric:robolectric:$robolectricVersion"
-    testImplementation 'junit:junit:4.12'
     testImplementation "com.google.truth:truth:$googleTruthVersion"
-    testImplementation 'androidx.test:core:1.2.0'
+    testImplementation 'junit:junit:4.12'
+    testImplementation "org.robolectric:robolectric:$robolectricVersion"
 }

@@ -25,6 +25,7 @@ import androidx.annotation.RestrictTo;
 import androidx.annotation.VisibleForTesting;
 import androidx.annotation.WorkerThread;
 import com.google.android.datatransport.Encoding;
+import com.google.android.datatransport.Priority;
 import com.google.android.datatransport.runtime.EncodedPayload;
 import com.google.android.datatransport.runtime.EventInternal;
 import com.google.android.datatransport.runtime.TransportContext;
@@ -41,7 +42,6 @@ import com.google.android.datatransport.runtime.time.Clock;
 import com.google.android.datatransport.runtime.time.Monotonic;
 import com.google.android.datatransport.runtime.time.WallTime;
 import com.google.android.datatransport.runtime.util.PriorityMapping;
-import dagger.Lazy;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -53,6 +53,7 @@ import java.util.Map;
 import java.util.Set;
 import javax.inject.Inject;
 import javax.inject.Named;
+import javax.inject.Provider;
 import javax.inject.Singleton;
 
 /** {@link EventStore} implementation backed by a SQLite database. */
@@ -72,7 +73,7 @@ public class SQLiteEventStore
   private final Clock wallClock;
   private final Clock monotonicClock;
   private final EventStoreConfig config;
-  private final Lazy<String> packageName;
+  private final Provider<String> packageName;
 
   @Inject
   SQLiteEventStore(
@@ -80,7 +81,7 @@ public class SQLiteEventStore
       @Monotonic Clock clock,
       EventStoreConfig config,
       SchemaManager schemaManager,
-      @Named("PACKAGE_NAME") Lazy<String> packageName) {
+      @Named("PACKAGE_NAME") Provider<String> packageName) {
 
     this.schemaManager = schemaManager;
     this.wallClock = wallClock;
@@ -134,6 +135,10 @@ public class SQLiteEventStore
               values.put("num_attempts", 0);
               values.put("inline", inline);
               values.put("payload", inline ? payloadBytes : new byte[0]);
+              values.put("product_id", event.getProductId());
+              values.put("pseudonymous_id", event.getPseudonymousId());
+              values.put("experiment_ids_clear_blob", event.getExperimentIdsClear());
+              values.put("experiment_ids_encrypted_blob", event.getExperimentIdsEncrypted());
               long newEventId = db.insert("events", null, values);
               if (!inline) {
                 int numChunks = (int) Math.ceil((double) payloadBytes.length / maxBlobSizePerRow);
@@ -338,7 +343,19 @@ public class SQLiteEventStore
   public Iterable<PersistedEvent> loadBatch(TransportContext transportContext) {
     return inTransaction(
         db -> {
-          List<PersistedEvent> events = loadEvents(db, transportContext);
+          List<PersistedEvent> events = loadEvents(db, transportContext, config.getLoadBatchSize());
+          for (Priority p : Priority.values()) {
+            if (p == transportContext.getPriority()) {
+              continue;
+            }
+            int space = config.getLoadBatchSize() - events.size();
+            if (space <= 0) {
+              break;
+            }
+            List<PersistedEvent> additional =
+                loadEvents(db, transportContext.withPriority(p), space);
+            events.addAll(additional);
+          }
           return join(events, loadMetadata(db, events));
         });
   }
@@ -415,7 +432,8 @@ public class SQLiteEventStore
   }
 
   /** Loads all events for a backend. */
-  private List<PersistedEvent> loadEvents(SQLiteDatabase db, TransportContext transportContext) {
+  private List<PersistedEvent> loadEvents(
+      SQLiteDatabase db, TransportContext transportContext, int limit) {
     List<PersistedEvent> events = new ArrayList<>();
     Long contextId = getTransportContextId(db, transportContext);
     if (contextId == null) {
@@ -434,13 +452,17 @@ public class SQLiteEventStore
               "payload",
               "code",
               "inline",
+              "product_id",
+              "pseudonymous_id",
+              "experiment_ids_clear_blob",
+              "experiment_ids_encrypted_blob",
             },
             "context_id = ?",
             new String[] {contextId.toString()},
             null,
             null,
             null,
-            String.valueOf(config.getLoadBatchSize())),
+            String.valueOf(limit)),
         cursor -> {
           while (cursor.moveToNext()) {
             long id = cursor.getLong(0);
@@ -459,6 +481,18 @@ public class SQLiteEventStore
             }
             if (!cursor.isNull(6)) {
               event.setCode(cursor.getInt(6));
+            }
+            if (!cursor.isNull(8)) {
+              event.setProductId(cursor.getInt(8));
+            }
+            if (!cursor.isNull(9)) {
+              event.setPseudonymousId(cursor.getString(9));
+            }
+            if (!cursor.isNull(10)) {
+              event.setExperimentIdsClear(cursor.getBlob(10));
+            }
+            if (!cursor.isNull(11)) {
+              event.setExperimentIdsEncrypted(cursor.getBlob(11));
             }
             events.add(PersistedEvent.create(id, transportContext, event.build()));
           }
@@ -666,13 +700,15 @@ public class SQLiteEventStore
                                 .build());
                   }
                   populateLogSourcesMetrics(clientMetricsBuilder, metricsMap);
-                  clientMetricsBuilder.setWindow(getTimeWindow());
-                  clientMetricsBuilder.setGlobalMetrics(getGlobalMetrics());
-                  clientMetricsBuilder.setAppNamespace(packageName.get());
-                  return clientMetricsBuilder.build();
+                  return clientMetricsBuilder
+                      .setWindow(getTimeWindow())
+                      .setGlobalMetrics(getGlobalMetrics())
+                      .setAppNamespace(packageName.get())
+                      .build();
                 }));
   }
 
+  @SuppressWarnings("CheckReturnValue")
   private void populateLogSourcesMetrics(
       ClientMetrics.Builder clientMetricsBuilder, Map<String, List<LogEventDropped>> metricsMap) {
     for (Map.Entry<String, List<LogEventDropped>> entry : metricsMap.entrySet()) {

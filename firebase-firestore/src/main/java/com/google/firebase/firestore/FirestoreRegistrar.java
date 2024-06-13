@@ -19,7 +19,7 @@ import androidx.annotation.Keep;
 import androidx.annotation.RestrictTo;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.FirebaseOptions;
-import com.google.firebase.appcheck.interop.InternalAppCheckTokenProvider;
+import com.google.firebase.appcheck.interop.InteropAppCheckTokenProvider;
 import com.google.firebase.auth.internal.InternalAuthProvider;
 import com.google.firebase.components.Component;
 import com.google.firebase.components.ComponentRegistrar;
@@ -39,17 +39,20 @@ import java.util.List;
 @Keep
 @RestrictTo(RestrictTo.Scope.LIBRARY_GROUP)
 public class FirestoreRegistrar implements ComponentRegistrar {
+  private static final String LIBRARY_NAME = "fire-fst";
+
   @Override
   @Keep
   public List<Component<?>> getComponents() {
     return Arrays.asList(
         Component.builder(FirestoreMultiDbComponent.class)
+            .name(LIBRARY_NAME)
             .add(Dependency.required(FirebaseApp.class))
             .add(Dependency.required(Context.class))
             .add(Dependency.optionalProvider(HeartBeatInfo.class))
             .add(Dependency.optionalProvider(UserAgentPublisher.class))
             .add(Dependency.deferred(InternalAuthProvider.class))
-            .add(Dependency.deferred(InternalAppCheckTokenProvider.class))
+            .add(Dependency.deferred(InteropAppCheckTokenProvider.class))
             .add(Dependency.optional(FirebaseOptions.class))
             .factory(
                 c ->
@@ -57,12 +60,12 @@ public class FirestoreRegistrar implements ComponentRegistrar {
                         c.get(Context.class),
                         c.get(FirebaseApp.class),
                         c.getDeferred(InternalAuthProvider.class),
-                        c.getDeferred(InternalAppCheckTokenProvider.class),
+                        c.getDeferred(InteropAppCheckTokenProvider.class),
                         new FirebaseClientGrpcMetadataProvider(
                             c.getProvider(UserAgentPublisher.class),
                             c.getProvider(HeartBeatInfo.class),
                             c.get(FirebaseOptions.class))))
             .build(),
-        LibraryVersionComponent.create("fire-fst", BuildConfig.VERSION_NAME));
+        LibraryVersionComponent.create(LIBRARY_NAME, BuildConfig.VERSION_NAME));
   }
 }

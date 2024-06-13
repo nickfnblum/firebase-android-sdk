@@ -19,6 +19,8 @@ import static com.google.firebase.firestore.Filter.and;
 import static com.google.firebase.firestore.Filter.equalTo;
 import static com.google.firebase.firestore.Filter.greaterThan;
 import static com.google.firebase.firestore.Filter.inArray;
+import static com.google.firebase.firestore.Filter.lessThan;
+import static com.google.firebase.firestore.Filter.notEqualTo;
 import static com.google.firebase.firestore.Filter.notInArray;
 import static com.google.firebase.firestore.Filter.or;
 import static com.google.firebase.firestore.testutil.Assert.assertThrows;
@@ -95,7 +97,16 @@ public class ValidationTest {
   @Test
   public void firestoreGetInstanceWithNullAppFails() {
     expectError(
-        () -> FirebaseFirestore.getInstance(null), "Provided FirebaseApp must not be null.");
+        () -> FirebaseFirestore.getInstance((FirebaseApp) null),
+        "Provided FirebaseApp must not be null.");
+  }
+
+  @Test
+  public void firestoreGetInstanceWithNullDbNameFails() {
+    FirebaseApp.initializeApp(ApplicationProvider.getApplicationContext());
+    expectError(
+        () -> FirebaseFirestore.getInstance((String) null),
+        "Provided database name must not be null.");
   }
 
   @Test
@@ -240,9 +251,12 @@ public class ValidationTest {
     expectWriteError(
         data,
         String.format(
-            "Invalid data. Document reference is for database %s/(default) but should be for "
-                + "database %s/(default) (found in field foo)",
-            IntegrationTestUtil.BAD_PROJECT_ID, IntegrationTestUtil.provider().projectId()));
+            "Invalid data. Document reference is for database %s/%s but should be for "
+                + "database %s/%s (found in field foo)",
+            IntegrationTestUtil.BAD_PROJECT_ID,
+            BuildConfig.TARGET_DATABASE_ID,
+            IntegrationTestUtil.provider().projectId(),
+            BuildConfig.TARGET_DATABASE_ID));
   }
 
   @Test
@@ -521,65 +535,10 @@ public class ValidationTest {
   }
 
   @Test
-  public void queriesWithDifferentInequalityFieldsFail() {
-    expectError(
-        () -> testCollection().whereGreaterThan("x", 32).whereLessThan("y", "cat"),
-        "All where filters with an inequality (notEqualTo, notIn, lessThan, "
-            + "lessThanOrEqualTo, greaterThan, or greaterThanOrEqualTo) must be on the "
-            + "same field. But you have filters on 'x' and 'y'");
-  }
-
-  @Test
-  public void queriesWithInequalityDifferentThanFirstOrderByFail() {
-    CollectionReference collection = testCollection();
-    String reason =
-        "Invalid query. You have an inequality where filter (whereLessThan(), "
-            + "whereGreaterThan(), etc.) on field 'x' and so you must also have 'x' as "
-            + "your first orderBy() field, but your first orderBy() is currently on field 'y' "
-            + "instead.";
-    expectError(() -> collection.whereGreaterThan("x", 32).orderBy("y"), reason);
-    expectError(() -> collection.orderBy("y").whereGreaterThan("x", 32), reason);
-    expectError(() -> collection.whereGreaterThan("x", 32).orderBy("y").orderBy("x"), reason);
-    expectError(() -> collection.orderBy("y").orderBy("x").whereGreaterThan("x", 32), reason);
-    expectError(() -> collection.orderBy("y").orderBy("x").whereNotEqualTo("x", 32), reason);
-  }
-
-  @Test
   public void queriesWithMultipleNotEqualAndInequalitiesFail() {
     expectError(
         () -> testCollection().whereNotEqualTo("x", 32).whereNotEqualTo("x", 33),
         "Invalid Query. You cannot use more than one '!=' filter.");
-
-    expectError(
-        () -> testCollection().whereNotEqualTo("x", 32).whereGreaterThan("y", 33),
-        "All where filters with an inequality (notEqualTo, notIn, lessThan, "
-            + "lessThanOrEqualTo, greaterThan, or greaterThanOrEqualTo) must be on the "
-            + "same field. But you have filters on 'x' and 'y'");
-  }
-
-  @Test
-  public void queriesWithMultipleArrayFiltersFail() {
-    expectError(
-        () -> testCollection().whereArrayContains("foo", 1).whereArrayContains("foo", 2),
-        "Invalid Query. You cannot use more than one 'array_contains' filter.");
-
-    expectError(
-        () ->
-            testCollection()
-                .whereArrayContains("foo", 1)
-                .whereArrayContainsAny("foo", asList(1, 2)),
-        "Invalid Query. You cannot use 'array_contains_any' filters with 'array_contains' filters.");
-
-    expectError(
-        () ->
-            testCollection()
-                .whereArrayContainsAny("foo", asList(1, 2))
-                .whereArrayContains("foo", 1),
-        "Invalid Query. You cannot use 'array_contains' filters with 'array_contains_any' filters.");
-
-    expectError(
-        () -> testCollection().whereNotIn("foo", asList(1, 2)).whereArrayContains("foo", 1),
-        "Invalid Query. You cannot use 'array_contains' filters with 'not_in' filters.");
   }
 
   @Test
@@ -596,42 +555,8 @@ public class ValidationTest {
   @Test
   public void queriesWithMultipleDisjunctiveFiltersFail() {
     expectError(
-        () -> testCollection().whereIn("foo", asList(1, 2)).whereIn("bar", asList(1, 2)),
-        "Invalid Query. You cannot use more than one 'in' filter.");
-
-    expectError(
         () -> testCollection().whereNotIn("foo", asList(1, 2)).whereNotIn("bar", asList(1, 2)),
-        "All where filters with an inequality (notEqualTo, notIn, lessThan, "
-            + "lessThanOrEqualTo, greaterThan, or greaterThanOrEqualTo) must be on the "
-            + "same field. But you have filters on 'foo' and 'bar'");
-
-    expectError(
-        () ->
-            testCollection()
-                .whereArrayContainsAny("foo", asList(1, 2))
-                .whereArrayContainsAny("bar", asList(1, 2)),
-        "Invalid Query. You cannot use more than one 'array_contains_any' filter.");
-
-    expectError(
-        () ->
-            testCollection()
-                .whereArrayContainsAny("foo", asList(1, 2))
-                .whereIn("bar", asList(1, 2)),
-        "Invalid Query. You cannot use 'in' filters with 'array_contains_any' filters.");
-
-    expectError(
-        () ->
-            testCollection()
-                .whereIn("bar", asList(1, 2))
-                .whereArrayContainsAny("foo", asList(1, 2)),
-        "Invalid Query. You cannot use 'array_contains_any' filters with 'in' filters.");
-
-    expectError(
-        () ->
-            testCollection()
-                .whereArrayContainsAny("foo", asList(1, 2))
-                .whereNotIn("bar", asList(1, 2)),
-        "Invalid Query. You cannot use 'not_in' filters with 'array_contains_any' filters.");
+        "Invalid Query. You cannot use more than one 'not_in' filter.");
 
     expectError(
         () ->
@@ -647,61 +572,6 @@ public class ValidationTest {
     expectError(
         () -> testCollection().whereIn("bar", asList(1, 2)).whereNotIn("foo", asList(1, 2)),
         "Invalid Query. You cannot use 'not_in' filters with 'in' filters.");
-
-    // This is redundant with the above tests, but makes sure our validation doesn't get confused.
-    expectError(
-        () ->
-            testCollection()
-                .whereIn("bar", asList(1, 2))
-                .whereArrayContains("foo", 1)
-                .whereArrayContainsAny("foo", asList(1, 2)),
-        "Invalid Query. You cannot use 'array_contains_any' filters with 'in' filters.");
-
-    expectError(
-        () ->
-            testCollection()
-                .whereArrayContains("foo", 1)
-                .whereIn("bar", asList(1, 2))
-                .whereArrayContainsAny("foo", asList(1, 2)),
-        "Invalid Query. You cannot use 'array_contains_any' filters with 'array_contains' filters.");
-
-    expectError(
-        () ->
-            testCollection()
-                .whereNotIn("bar", asList(1, 2))
-                .whereArrayContains("foo", 1)
-                .whereArrayContainsAny("foo", asList(1, 2)),
-        "Invalid Query. You cannot use 'array_contains' filters with 'not_in' filters.");
-
-    expectError(
-        () ->
-            testCollection()
-                .whereArrayContains("foo", 1)
-                .whereIn("foo", asList(1, 2))
-                .whereNotIn("bar", asList(1, 2)),
-        "Invalid Query. You cannot use 'not_in' filters with 'array_contains' filters.");
-  }
-
-  @Test
-  public void queriesCanUseInWithArrayContains() {
-    testCollection().whereArrayContains("foo", 1).whereIn("bar", asList(1, 2));
-    testCollection().whereIn("bar", asList(1, 2)).whereArrayContains("foo", 1);
-
-    expectError(
-        () ->
-            testCollection()
-                .whereIn("bar", asList(1, 2))
-                .whereArrayContains("foo", 1)
-                .whereArrayContains("foo", 1),
-        "Invalid Query. You cannot use more than one 'array_contains' filter.");
-
-    expectError(
-        () ->
-            testCollection()
-                .whereArrayContains("foo", 1)
-                .whereIn("bar", asList(1, 2))
-                .whereIn("bar", asList(1, 2)),
-        "Invalid Query. You cannot use more than one 'in' filter.");
   }
 
   @Test
@@ -717,22 +587,6 @@ public class ValidationTest {
     expectError(
         () -> testCollection().whereArrayContainsAny("bar", asList()),
         "Invalid Query. A non-empty array is required for 'array_contains_any' filters.");
-
-    expectError(
-        // The 10 element max includes duplicates.
-        () -> testCollection().whereIn("bar", asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9)),
-        "Invalid Query. 'in' filters support a maximum of 10 elements in the value array.");
-
-    expectError(
-        // The 10 element max includes duplicates.
-        () -> testCollection().whereNotIn("bar", asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9)),
-        "Invalid Query. 'not_in' filters support a maximum of 10 elements in the value array.");
-
-    expectError(
-        // The 10 element max includes duplicates.
-        () ->
-            testCollection().whereArrayContainsAny("bar", asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9)),
-        "Invalid Query. 'array_contains_any' filters support a maximum of 10 elements in the value array.");
   }
 
   @Test
@@ -823,37 +677,71 @@ public class ValidationTest {
   }
 
   @Test
+  public void testConflictingOperatorsInCompositeFilters() {
+    CollectionReference collection = testCollection();
+    // Composite queries can validate conflicting operators in multiple inequality.
+    String reason = "Invalid Query. You cannot use more than one '!=' filter.";
+    expectError(
+        () ->
+            collection
+                .where(
+                    or(
+                        and(lessThan("a", "b"), inArray("c", Arrays.asList("d", "e"))),
+                        and(equalTo("e", "f"), notEqualTo("g", "h"))))
+                .where(
+                    or(
+                        and(greaterThan("i", "j"), greaterThan("k", "l")),
+                        and(notEqualTo("o", "p"), lessThan("q", "r")))),
+        reason);
+
+    reason = "Invalid Query. You cannot use more than one 'not_in' filter.";
+    expectError(
+        () ->
+            collection
+                .where(
+                    or(
+                        and(lessThan("a", "b"), notInArray("c", Arrays.asList("d", "e"))),
+                        and(equalTo("e", "f"), lessThan("g", "j"))))
+                .where(
+                    or(
+                        and(greaterThan("i", "j"), greaterThan("k", "l")),
+                        and(notInArray("o", Arrays.asList("p", "q")), lessThan("q", "r")))),
+        reason);
+
+    reason = "Invalid Query. You cannot use 'not_in' filters with '!=' filters.";
+    expectError(
+        () ->
+            collection
+                .where(
+                    or(
+                        and(lessThan("a", "b"), greaterThan("c", "d")),
+                        and(equalTo("e", "f"), notEqualTo("g", "h"))))
+                .where(
+                    or(
+                        and(greaterThan("i", "j"), greaterThan("k", "l")),
+                        and(notInArray("o", Arrays.asList("p", "q")), lessThan("q", "r")))),
+        reason);
+
+    reason = "Invalid Query. You cannot use 'not_in' filters with 'in' filters.";
+    expectError(
+        () ->
+            collection
+                .where(
+                    or(
+                        and(lessThan("a", "b"), inArray("c", Arrays.asList("d", "e"))),
+                        and(equalTo("e", "f"), lessThan("g", "j"))))
+                .where(
+                    or(
+                        and(greaterThan("i", "j"), greaterThan("k", "l")),
+                        and(notInArray("o", Arrays.asList("p", "q")), lessThan("q", "r")))),
+        reason);
+  }
+
+  @Test
   public void testInvalidQueryFilters() {
     CollectionReference collection = testCollection();
-
-    // Multiple inequalities, one of which is inside a nested composite filter.
-    String reason =
-        "All where filters with an inequality (notEqualTo, notIn, lessThan, lessThanOrEqualTo, greaterThan, or greaterThanOrEqualTo) must be on the same field. But you have filters on 'c' and 'r'";
-    expectError(
-        () ->
-            collection
-                .where(
-                    or(
-                        and(equalTo("a", "b"), greaterThan("c", "d")),
-                        and(equalTo("e", "f"), equalTo("g", "h"))))
-                .where(greaterThan("r", "s")),
-        reason);
-
-    // OrderBy and inequality on different fields. Inequality inside a nested composite filter.
-    reason =
-        "Invalid query. You have an inequality where filter (whereLessThan(), whereGreaterThan(), etc.) on field 'c' and so you must also have 'c' as your first orderBy() field, but your first orderBy() is currently on field 'r' instead.";
-    expectError(
-        () ->
-            collection
-                .where(
-                    or(
-                        and(equalTo("a", "b"), greaterThan("c", "d")),
-                        and(equalTo("e", "f"), equalTo("g", "h"))))
-                .orderBy("r"),
-        reason);
-
     // Conflicting operations within a composite filter.
-    reason = "Invalid Query. You cannot use 'not_in' filters with 'in' filters.";
+    String reason = "Invalid Query. You cannot use 'not_in' filters with 'in' filters.";
     expectError(
         () ->
             collection.where(

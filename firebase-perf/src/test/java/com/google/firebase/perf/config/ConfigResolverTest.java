@@ -25,7 +25,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.MockitoAnnotations.initMocks;
-import static org.robolectric.util.ReflectionHelpers.setStaticField;
 
 import android.os.Bundle;
 import androidx.test.core.app.ApplicationProvider;
@@ -33,12 +32,13 @@ import com.google.firebase.perf.BuildConfig;
 import com.google.firebase.perf.FirebasePerformanceTestBase;
 import com.google.firebase.perf.util.ImmutableBundle;
 import com.google.firebase.perf.util.Optional;
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.robolectric.RobolectricTestRunner;
-import org.robolectric.util.ReflectionHelpers;
 
 /** Unit tests for {@link ConfigResolver}. */
 @RunWith(RobolectricTestRunner.class)
@@ -170,46 +170,12 @@ public class ConfigResolverTest extends FirebasePerformanceTestBase {
   }
 
   @Test
-  public void getIsServiceCollectionEnabled_sdkDisabledVersionIsRed_returnsFalse() {
-    when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(false);
-    when(mockRemoteConfigManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_FRC_KEY))
-        .thenReturn(Optional.of(true));
-
-    // Disable SDK version.
-    setStaticField(
-        BuildConfig.class,
-        /* fieldName= */ "FIREPERF_VERSION_NAME",
-        /* fieldNewValue= */ "1.0.0.111111111");
-    when(mockRemoteConfigManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_FRC_KEY))
-        .thenReturn(Optional.of("1.0.0.111111111"));
-
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isFalse();
-  }
-
-  @Test
   public void getIsServiceCollectionEnabled_sdkDisabled_returnsFalse() {
     when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(false);
     when(mockRemoteConfigManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_FRC_KEY))
         .thenReturn(Optional.of(""));
     when(mockRemoteConfigManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_FRC_KEY))
         .thenReturn(Optional.of(false));
-
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isFalse();
-  }
-
-  @Test
-  public void getIsServiceCollectionEnabled_sdkDisabledVersionAndSdkDisabled_returnsFalse() {
-    when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(false);
-    when(mockRemoteConfigManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_FRC_KEY))
-        .thenReturn(Optional.of(false));
-
-    // Disable SDK version.
-    setStaticField(
-        BuildConfig.class,
-        /* fieldName= */ "FIREPERF_VERSION_NAME",
-        /* fieldNewValue= */ "1.0.0.111111111");
-    when(mockRemoteConfigManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_FRC_KEY))
-        .thenReturn(Optional.of("1.0.0.111111111"));
 
     assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isFalse();
   }
@@ -294,80 +260,6 @@ public class ConfigResolverTest extends FirebasePerformanceTestBase {
   }
 
   @Test
-  public void
-      getIsServiceCollectionEnabled_sdkDisabledVersionFlagFetchSucceededFromFrc_returnFrcValue() {
-    // As long as SDK enabled flag is enabled, it depends on SDK disabled version only for
-    // enabled/disabled.
-    when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(false);
-    when(mockRemoteConfigManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_FRC_KEY))
-        .thenReturn(Optional.of(true));
-
-    // Mock that current Fireperf SDK version is disabled.
-    setStaticField(
-        BuildConfig.class,
-        /* fieldName= */ "FIREPERF_VERSION_NAME",
-        /* fieldNewValue= */ "1.0.0.111111111");
-    when(mockRemoteConfigManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_FRC_KEY))
-        .thenReturn(Optional.of("1.0.0.111111111"));
-
-    // Assert that final result is false, and FRC value is cached.
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isFalse();
-    verify(mockDeviceCacheManager, times(1))
-        .setValue(eq(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_CACHE_KEY), eq("1.0.0.111111111"));
-  }
-
-  @Test
-  public void
-      getIsServiceCollectionEnabled_sdkDisabledVersionFlagFetchFailedFromFrc_returnFrcValue() {
-    // As long as SDK enabled flag is enabled, it depends on SDK disabled version only for
-    // enabled/disabled.
-    when(mockRemoteConfigManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_FRC_KEY))
-        .thenReturn(Optional.absent());
-    when(mockDeviceCacheManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_CACHE_KEY))
-        .thenReturn(Optional.absent());
-
-    // Mock that Fireperf SDK version is disabled by FRC, but fetch status is failure.
-    when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(true);
-    setStaticField(
-        BuildConfig.class,
-        /* fieldName= */ "FIREPERF_VERSION_NAME",
-        /* fieldNewValue= */ "1.0.0.111111111");
-    when(mockRemoteConfigManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_FRC_KEY))
-        .thenReturn(Optional.of("1.0.0.111111111"));
-
-    // Assert that final result is false. cache FRC value because it is most recent available value.
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isFalse();
-    verify(mockDeviceCacheManager, times(1))
-        .setValue(eq(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_CACHE_KEY), eq("1.0.0.111111111"));
-  }
-
-  @Test
-  public void getIsServiceCollectionEnabled_sdkDisabledVersionFlagNoFrc_returnCacheValue() {
-    // As long as SDK enabled flag is enabled, it depends on SDK disabled version only for
-    // enabled/disabled.
-    when(mockRemoteConfigManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_FRC_KEY))
-        .thenReturn(Optional.absent());
-    when(mockDeviceCacheManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_CACHE_KEY))
-        .thenReturn(Optional.absent());
-
-    // Mock that Fireperf SDK version is not set by FRC.
-    when(mockRemoteConfigManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_FRC_KEY))
-        .thenReturn(Optional.absent());
-
-    // Mock device caching value that includes current SDK version.
-    setStaticField(
-        BuildConfig.class,
-        /* fieldName= */ "FIREPERF_VERSION_NAME",
-        /* fieldNewValue= */ "1.0.0.111111111");
-    when(mockDeviceCacheManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_CACHE_KEY))
-        .thenReturn(Optional.of("1.0.0.111111111"));
-
-    // Assert that final result is false, and no value is cached.
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isFalse();
-    verify(mockDeviceCacheManager, never()).setValue(any(), anyString());
-  }
-
-  @Test
   public void getIsServiceCollectionEnabled_sdkDisabledVersionFlagNoFrc_returnDefaultValue() {
     // As long as SDK enabled flag is enabled, it depends on SDK disabled version only for
     // enabled/disabled.
@@ -391,110 +283,79 @@ public class ConfigResolverTest extends FirebasePerformanceTestBase {
 
   @Test
   public void
-      getIsServiceCollectionEnabled_frcFetchSucceedAndFprFlagEnabled_disabledVersionsAreHonored() {
-    // As long as SDK enabled flag is enabled, it depends on SDK disabled version only for
-    // enabled/disabled.
+      getIsPerformanceCollectionConfigValueAvailable_noDeviceCacheNoRemoteConfig_returnsFalse() {
+    when(mockDeviceCacheManager.getBoolean(FIREBASE_PERFORMANCE_COLLECTION_ENABLED_CACHE_KEY))
+        .thenReturn(Optional.absent());
+    when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(false);
     when(mockRemoteConfigManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_FRC_KEY))
         .thenReturn(Optional.absent());
-    when(mockDeviceCacheManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_CACHE_KEY))
-        .thenReturn(Optional.of(true));
-    when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(false);
-
-    setStaticField(
-        BuildConfig.class,
-        /* fieldName= */ "FIREPERF_VERSION_NAME",
-        /* fieldNewValue= */ "1.0.0.111111111");
-
-    // Handling for empty string.
-    when(mockRemoteConfigManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_FRC_KEY))
-        .thenReturn(Optional.of(""));
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isTrue();
-
-    // Handling for random space in empty string.
-    when(mockRemoteConfigManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_FRC_KEY))
-        .thenReturn(Optional.of("   "));
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isTrue();
-
-    // Handling for empty string but ";" separated.
-    when(mockRemoteConfigManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_FRC_KEY))
-        .thenReturn(Optional.of("  ;   "));
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isTrue();
-
-    // Handling for exact one version.
-    when(mockRemoteConfigManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_FRC_KEY))
-        .thenReturn(Optional.of(" 1.0.0.111111111"));
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isFalse();
-    when(mockRemoteConfigManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_FRC_KEY))
-        .thenReturn(Optional.of("1.2.0.222222222"));
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isTrue();
-
-    // Handling for multiple ";" separated versions with no space between.
-    when(mockRemoteConfigManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_FRC_KEY))
-        .thenReturn(Optional.of("1.2.0.222222222;1.0.0.111111111;1.3.0.333333333"));
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isFalse();
-
-    // Handling for multiple ";" separated versions with random space between.
-    when(mockRemoteConfigManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_FRC_KEY))
-        .thenReturn(Optional.of("1.2.0.222222222 ;  1.0.0.111111111; 1.3.0.333333333"));
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isFalse();
-    when(mockRemoteConfigManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_FRC_KEY))
-        .thenReturn(Optional.of("; 1.2.0.222222222;   1.3.0.333333333"));
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isTrue();
+    assertThat(testConfigResolver.isCollectionEnabledConfigValueAvailable()).isFalse();
   }
 
   @Test
   public void
-      getIsServiceCollectionEnabled_noFrcForSdkDisabledVersioned_disabledVersionsOnCacheAreHonored() {
-    // As long as SDK enabled flag is enabled, it depends on SDK disabled version only for
-    // enabled/disabled.
-    when(mockRemoteConfigManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_FRC_KEY))
-        .thenReturn(Optional.absent());
-    when(mockDeviceCacheManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_CACHE_KEY))
+      getIsPerformanceCollectionConfigValueAvailable_noDeviceCacheHasRemoteConfigValueFalse_returnsTrue() {
+    when(mockDeviceCacheManager.getBoolean(FIREBASE_PERFORMANCE_COLLECTION_ENABLED_CACHE_KEY))
         .thenReturn(Optional.absent());
     when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(false);
+    when(mockRemoteConfigManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_FRC_KEY))
+        .thenReturn(Optional.of(false));
+    assertThat(testConfigResolver.isCollectionEnabledConfigValueAvailable()).isTrue();
+  }
 
-    when(mockRemoteConfigManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_FRC_KEY))
+  @Test
+  public void
+      getIsPerformanceCollectionConfigValueAvailable_HasDeviceCacheNoRemoteConfigValue_returnsTrue() {
+    when(mockDeviceCacheManager.getBoolean(FIREBASE_PERFORMANCE_COLLECTION_ENABLED_CACHE_KEY))
+        .thenReturn(Optional.of(false));
+    when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(false);
+    when(mockRemoteConfigManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_FRC_KEY))
         .thenReturn(Optional.absent());
-    setStaticField(
-        BuildConfig.class,
-        /* fieldName= */ "FIREPERF_VERSION_NAME",
-        /* fieldNewValue= */ "1.0.0.111111111");
+    assertThat(testConfigResolver.isCollectionEnabledConfigValueAvailable()).isTrue();
+  }
 
-    // Handling for empty string.
-    when(mockDeviceCacheManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_CACHE_KEY))
-        .thenReturn(Optional.of(""));
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isTrue();
+  @Test
+  public void
+      getIsPerformanceCollectionConfigValueAvailable_HasDeviceCacheFalseHasRemoteConfigValueFalse_returnsTrue() {
+    when(mockDeviceCacheManager.getBoolean(FIREBASE_PERFORMANCE_COLLECTION_ENABLED_CACHE_KEY))
+        .thenReturn(Optional.of(false));
+    when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(false);
+    when(mockRemoteConfigManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_FRC_KEY))
+        .thenReturn(Optional.of(false));
+    assertThat(testConfigResolver.isCollectionEnabledConfigValueAvailable()).isTrue();
+  }
 
-    // Handling for random space in empty string.
-    when(mockDeviceCacheManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_CACHE_KEY))
-        .thenReturn(Optional.of("   "));
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isTrue();
+  @Test
+  public void
+      getIsPerformanceCollectionConfigValueAvailable_noDeviceCacheHasRemoteConfigValueTrue_returnsTrue() {
+    when(mockDeviceCacheManager.getBoolean(FIREBASE_PERFORMANCE_COLLECTION_ENABLED_CACHE_KEY))
+        .thenReturn(Optional.of(false));
+    when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(false);
+    when(mockRemoteConfigManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_FRC_KEY))
+        .thenReturn(Optional.of(true));
+    assertThat(testConfigResolver.isCollectionEnabledConfigValueAvailable()).isTrue();
+  }
 
-    // Handling for empty string but ";" separated.
-    when(mockDeviceCacheManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_CACHE_KEY))
-        .thenReturn(Optional.of("  ;   "));
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isTrue();
+  @Test
+  public void
+      getIsPerformanceCollectionConfigValueAvailable_hasDeviceCacheHasRemoteConfigValueFalse_returnsTrue() {
+    when(mockDeviceCacheManager.getBoolean(FIREBASE_PERFORMANCE_COLLECTION_ENABLED_CACHE_KEY))
+        .thenReturn(Optional.of(true));
+    when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(false);
+    when(mockRemoteConfigManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_FRC_KEY))
+        .thenReturn(Optional.of(false));
+    assertThat(testConfigResolver.isCollectionEnabledConfigValueAvailable()).isTrue();
+  }
 
-    // Handling for exact one version.
-    when(mockDeviceCacheManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_CACHE_KEY))
-        .thenReturn(Optional.of(" 1.0.0.111111111"));
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isFalse();
-    when(mockDeviceCacheManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_CACHE_KEY))
-        .thenReturn(Optional.of("1.2.0.222222222"));
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isTrue();
-
-    // Handling for multiple ";" separated versions with no space between.
-    when(mockDeviceCacheManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_CACHE_KEY))
-        .thenReturn(Optional.of("1.2.0.222222222;1.0.0.111111111;1.3.0.333333333"));
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isFalse();
-
-    // Handling for multiple ";" separated versions with random space between.
-    when(mockDeviceCacheManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_CACHE_KEY))
-        .thenReturn(Optional.of("1.2.0.222222222 ;  1.0.0.111111111; 1.3.0.333333333"));
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isFalse();
-    when(mockDeviceCacheManager.getString(FIREBASE_PERFORMANCE_DISABLED_VERSIONS_CACHE_KEY))
-        .thenReturn(Optional.of("; 1.2.0.222222222;   1.3.0.333333333"));
-    assertThat(testConfigResolver.getIsServiceCollectionEnabled()).isTrue();
+  @Test
+  public void
+      getIsPerformanceCollectionConfigValueAvailable_hasDeviceCacheHasRemoteConfig_returnsTrue() {
+    when(mockDeviceCacheManager.getBoolean(FIREBASE_PERFORMANCE_COLLECTION_ENABLED_CACHE_KEY))
+        .thenReturn(Optional.of(true));
+    when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(false);
+    when(mockRemoteConfigManager.getBoolean(FIREBASE_PERFORMANCE_SDK_ENABLED_FRC_KEY))
+        .thenReturn(Optional.of(true));
+    assertThat(testConfigResolver.isCollectionEnabledConfigValueAvailable()).isTrue();
   }
 
   @Test
@@ -645,6 +506,18 @@ public class ConfigResolverTest extends FirebasePerformanceTestBase {
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
     assertThat(testConfigResolver.getSessionsCpuCaptureFrequencyForegroundMs()).isEqualTo(100L);
+  }
+
+  @Test
+  public void
+      getSessionsCpuCaptureFrequencyForegroundMs_remoteConfigFetchFailed_returnDefaultRCValue() {
+    when(mockRemoteConfigManager.getLong(SESSIONS_CPU_CAPTURE_FREQUENCY_FG_MS_FRC_KEY))
+        .thenReturn(Optional.absent());
+    when(mockDeviceCacheManager.getLong(SESSIONS_CPU_CAPTURE_FREQUENCY_FG_MS_CACHE_KEY))
+        .thenReturn(Optional.absent());
+    when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(true);
+
+    assertThat(testConfigResolver.getSessionsCpuCaptureFrequencyForegroundMs()).isEqualTo(300L);
   }
 
   @Test
@@ -1049,6 +922,18 @@ public class ConfigResolverTest extends FirebasePerformanceTestBase {
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
     assertThat(testConfigResolver.getSessionsMemoryCaptureFrequencyForegroundMs()).isEqualTo(100L);
+  }
+
+  @Test
+  public void
+      getSessionsMemoryCaptureFrequencyForegroundMs_remoteConfigFetchFailed_returnDefaultRCValue() {
+    when(mockRemoteConfigManager.getLong(SESSIONS_MEMORY_CAPTURE_FREQUENCY_FG_MS_FRC_KEY))
+        .thenReturn(Optional.absent());
+    when(mockDeviceCacheManager.getLong(SESSIONS_MEMORY_CAPTURE_FREQUENCY_FG_MS_CACHE_KEY))
+        .thenReturn(Optional.absent());
+    when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(true);
+
+    assertThat(testConfigResolver.getSessionsMemoryCaptureFrequencyForegroundMs()).isEqualTo(300L);
   }
 
   @Test
@@ -1645,358 +1530,390 @@ public class ConfigResolverTest extends FirebasePerformanceTestBase {
 
   @Test
   public void getTraceSamplingRate_noRemoteConfig_returnsDefault() {
-    when(mockRemoteConfigManager.getFloat(TRACE_SAMPLING_RATE_FRC_KEY))
+    when(mockRemoteConfigManager.getDouble(TRACE_SAMPLING_RATE_FRC_KEY))
         .thenReturn(Optional.absent());
-    when(mockDeviceCacheManager.getFloat(TRACE_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(1.00f));
+    when(mockDeviceCacheManager.getDouble(TRACE_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(1.00));
 
-    assertThat(testConfigResolver.getTraceSamplingRate()).isEqualTo(1.00f);
+    assertThat(testConfigResolver.getTraceSamplingRate()).isEqualTo(1.00);
+  }
+
+  @Test
+  public void getTraceSamplingRate_remoteConfigFetchFailed_returnsRCFailureDefault() {
+    when(mockRemoteConfigManager.getDouble(TRACE_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.absent());
+    when(mockDeviceCacheManager.getDouble(TRACE_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.absent());
+    when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(true);
+
+    assertThat(testConfigResolver.getTraceSamplingRate()).isEqualTo(1.00 / 1000);
   }
 
   @Test
   public void getTraceSamplingRate_noRemoteConfigHasCache_returnsCache() {
-    when(mockRemoteConfigManager.getFloat(TRACE_SAMPLING_RATE_FRC_KEY))
+    when(mockRemoteConfigManager.getDouble(TRACE_SAMPLING_RATE_FRC_KEY))
         .thenReturn(Optional.absent());
-    when(mockDeviceCacheManager.getFloat(TRACE_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(0.01f));
+    when(mockDeviceCacheManager.getDouble(TRACE_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(0.01));
 
-    assertThat(testConfigResolver.getTraceSamplingRate()).isEqualTo(0.01f);
+    assertThat(testConfigResolver.getTraceSamplingRate()).isEqualTo(0.01);
   }
 
   @Test
   public void getTraceSamplingRate_validRemoteConfig_returnsRemoteConfigValue() {
-    when(mockRemoteConfigManager.getFloat(TRACE_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.01f));
-    when(mockDeviceCacheManager.getFloat(TRACE_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(0.02f));
+    when(mockRemoteConfigManager.getDouble(TRACE_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.01));
+    when(mockDeviceCacheManager.getDouble(TRACE_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(0.02));
 
-    assertThat(testConfigResolver.getTraceSamplingRate()).isEqualTo(0.01f);
-    verify(mockDeviceCacheManager, times(1)).setValue(eq(TRACE_SAMPLING_RATE_CACHE_KEY), eq(0.01f));
+    assertThat(testConfigResolver.getTraceSamplingRate()).isEqualTo(0.01);
+    verify(mockDeviceCacheManager, times(1)).setValue(eq(TRACE_SAMPLING_RATE_CACHE_KEY), eq(0.01));
   }
 
   @Test
   public void getTraceSamplingRate_remoteConfigValueTooHigh_returnsDefaultValue() {
-    when(mockRemoteConfigManager.getFloat(TRACE_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(1.01f));
-    when(mockDeviceCacheManager.getFloat(TRACE_SAMPLING_RATE_CACHE_KEY))
+    when(mockRemoteConfigManager.getDouble(TRACE_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(1.01));
+    when(mockDeviceCacheManager.getDouble(TRACE_SAMPLING_RATE_CACHE_KEY))
         .thenReturn(Optional.absent());
 
-    assertThat(testConfigResolver.getTraceSamplingRate()).isEqualTo(1.00f);
+    assertThat(testConfigResolver.getTraceSamplingRate()).isEqualTo(1.00);
     verify(mockDeviceCacheManager, never()).setValue(anyString(), anyLong());
   }
 
   @Test
   public void getTraceSamplingRate_remoteConfigValueTooLow_returnsDefaultValue() {
-    when(mockRemoteConfigManager.getFloat(TRACE_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(-0.01f));
-    when(mockDeviceCacheManager.getFloat(TRACE_SAMPLING_RATE_CACHE_KEY))
+    when(mockRemoteConfigManager.getDouble(TRACE_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(-0.01));
+    when(mockDeviceCacheManager.getDouble(TRACE_SAMPLING_RATE_CACHE_KEY))
         .thenReturn(Optional.absent());
 
-    assertThat(testConfigResolver.getTraceSamplingRate()).isEqualTo(1.00f);
+    assertThat(testConfigResolver.getTraceSamplingRate()).isEqualTo(1.00);
     verify(mockDeviceCacheManager, never()).setValue(anyString(), anyLong());
   }
 
   @Test
   public void getTraceSamplingRate_10digitRemoteConfig_returnsRemoteConfigValue() {
-    when(mockRemoteConfigManager.getFloat(TRACE_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.0000000001f));
+    when(mockRemoteConfigManager.getDouble(TRACE_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.0000000001));
 
-    assertThat(testConfigResolver.getTraceSamplingRate()).isEqualTo(0.0000000001f);
+    assertThat(testConfigResolver.getTraceSamplingRate()).isEqualTo(0.0000000001);
   }
 
   @Test
   public void getNetworkRequestSamplingRate_noRemoteConfig_returnsDefault() {
-    when(mockRemoteConfigManager.getFloat(NETWORK_REQUEST_SAMPLING_RATE_FRC_KEY))
+    when(mockRemoteConfigManager.getDouble(NETWORK_REQUEST_SAMPLING_RATE_FRC_KEY))
         .thenReturn(Optional.absent());
-    when(mockDeviceCacheManager.getFloat(NETWORK_REQUEST_SAMPLING_RATE_CACHE_KEY))
+    when(mockDeviceCacheManager.getDouble(NETWORK_REQUEST_SAMPLING_RATE_CACHE_KEY))
         .thenReturn(Optional.absent());
 
-    assertThat(testConfigResolver.getNetworkRequestSamplingRate()).isEqualTo(1.00f);
+    assertThat(testConfigResolver.getNetworkRequestSamplingRate()).isEqualTo(1.00);
+  }
+
+  @Test
+  public void getNetworkRequestSamplingRate_remoteConfigFetchFailed_returnsRCFailureDefault() {
+    when(mockRemoteConfigManager.getDouble(NETWORK_REQUEST_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.absent());
+    when(mockDeviceCacheManager.getDouble(NETWORK_REQUEST_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.absent());
+    when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(true);
+
+    assertThat(testConfigResolver.getNetworkRequestSamplingRate()).isEqualTo(1.00 / 1000);
   }
 
   @Test
   public void getNetworkRequestSamplingRate_noRemoteConfigHasCache_returnsCache() {
-    when(mockRemoteConfigManager.getFloat(NETWORK_REQUEST_SAMPLING_RATE_FRC_KEY))
+    when(mockRemoteConfigManager.getDouble(NETWORK_REQUEST_SAMPLING_RATE_FRC_KEY))
         .thenReturn(Optional.absent());
-    when(mockDeviceCacheManager.getFloat(NETWORK_REQUEST_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(0.01f));
+    when(mockDeviceCacheManager.getDouble(NETWORK_REQUEST_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(0.01));
 
-    assertThat(testConfigResolver.getNetworkRequestSamplingRate()).isEqualTo(0.01f);
+    assertThat(testConfigResolver.getNetworkRequestSamplingRate()).isEqualTo(0.01);
   }
 
   @Test
   public void getNetworkRequestSamplingRate_validRemoteConfig_returnsRemoteConfigValue() {
-    when(mockRemoteConfigManager.getFloat(NETWORK_REQUEST_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.01f));
-    when(mockDeviceCacheManager.getFloat(NETWORK_REQUEST_SAMPLING_RATE_CACHE_KEY))
+    when(mockRemoteConfigManager.getDouble(NETWORK_REQUEST_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.01));
+    when(mockDeviceCacheManager.getDouble(NETWORK_REQUEST_SAMPLING_RATE_CACHE_KEY))
         .thenReturn(Optional.absent());
 
-    assertThat(testConfigResolver.getNetworkRequestSamplingRate()).isEqualTo(0.01f);
+    assertThat(testConfigResolver.getNetworkRequestSamplingRate()).isEqualTo(0.01);
     verify(mockDeviceCacheManager, times(1))
-        .setValue(eq(NETWORK_REQUEST_SAMPLING_RATE_CACHE_KEY), eq(0.01f));
+        .setValue(eq(NETWORK_REQUEST_SAMPLING_RATE_CACHE_KEY), eq(0.01));
   }
 
   @Test
   public void getNetworkRequestSamplingRate_remoteConfigValueTooHigh_returnsDefaultValue() {
-    when(mockRemoteConfigManager.getFloat(NETWORK_REQUEST_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(1.01f));
-    when(mockDeviceCacheManager.getFloat(NETWORK_REQUEST_SAMPLING_RATE_CACHE_KEY))
+    when(mockRemoteConfigManager.getDouble(NETWORK_REQUEST_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(1.01));
+    when(mockDeviceCacheManager.getDouble(NETWORK_REQUEST_SAMPLING_RATE_CACHE_KEY))
         .thenReturn(Optional.absent());
 
-    assertThat(testConfigResolver.getNetworkRequestSamplingRate()).isEqualTo(1.00f);
+    assertThat(testConfigResolver.getNetworkRequestSamplingRate()).isEqualTo(1.00);
     verify(mockDeviceCacheManager, never()).setValue(anyString(), anyLong());
   }
 
   @Test
   public void getNetworkRequestSamplingRate_remoteConfigValueTooLow_returnsDefaultValue() {
-    when(mockDeviceCacheManager.getFloat(NETWORK_REQUEST_SAMPLING_RATE_CACHE_KEY))
+    when(mockDeviceCacheManager.getDouble(NETWORK_REQUEST_SAMPLING_RATE_CACHE_KEY))
         .thenReturn(Optional.absent());
-    when(mockRemoteConfigManager.getFloat(NETWORK_REQUEST_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(-0.01f));
+    when(mockRemoteConfigManager.getDouble(NETWORK_REQUEST_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(-0.01));
 
-    assertThat(testConfigResolver.getNetworkRequestSamplingRate()).isEqualTo(1.00f);
+    assertThat(testConfigResolver.getNetworkRequestSamplingRate()).isEqualTo(1.00);
     verify(mockDeviceCacheManager, never()).setValue(anyString(), anyLong());
   }
 
   @Test
   public void getNetworkRequestSamplingRate_10digitRemoteConfig_returnsRemoteConfigValue() {
-    when(mockRemoteConfigManager.getFloat(NETWORK_REQUEST_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.0000000001f));
+    when(mockRemoteConfigManager.getDouble(NETWORK_REQUEST_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.0000000001));
 
-    assertThat(testConfigResolver.getNetworkRequestSamplingRate()).isEqualTo(0.0000000001f);
+    assertThat(testConfigResolver.getNetworkRequestSamplingRate()).isEqualTo(0.0000000001);
   }
 
   @Test
   public void getSessionsSamplingRate_validMetadata_returnsMetadata() {
     // #1 pass: Validate that method returns Remote Config Value when there is no metadata value.
-    when(mockRemoteConfigManager.getFloat(SESSION_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.01f));
+    when(mockRemoteConfigManager.getDouble(SESSION_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.01));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.01f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.01);
 
     // #2 pass: Validate that method returns Metadata value which takes higher precedence.
     Bundle bundle = new Bundle();
-    bundle.putFloat("sessions_sampling_percentage", 20.0f);
+    bundle.putDouble("sessions_sampling_percentage", 20.0);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.2f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.2);
   }
 
   @Test
   public void getSessionsSamplingRate_validMetadata_notSaveMetadataInCache() {
     Bundle bundle = new Bundle();
-    bundle.putFloat("sessions_sampling_percentage", 20.0f);
+    bundle.putDouble("sessions_sampling_percentage", 20.0);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.2f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.2);
 
     verify(mockDeviceCacheManager, never()).setValue(any(), any());
   }
 
   @Test
   public void getSessionsSamplingRate_invalidAndroidMetadataBundle_returnDefaultValue() {
-    when(mockRemoteConfigManager.getFloat(SESSION_SAMPLING_RATE_FRC_KEY))
+    when(mockRemoteConfigManager.getDouble(SESSION_SAMPLING_RATE_FRC_KEY))
         .thenReturn(Optional.absent());
-    when(mockDeviceCacheManager.getFloat(SESSION_SAMPLING_RATE_CACHE_KEY))
+    when(mockDeviceCacheManager.getDouble(SESSION_SAMPLING_RATE_CACHE_KEY))
         .thenReturn(Optional.absent());
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.01f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.01);
 
     // Case #1: Android Metadata bundle value is too high.
     Bundle bundle = new Bundle();
-    bundle.putFloat("sessions_sampling_percentage", 200.00f);
+    bundle.putDouble("sessions_sampling_percentage", 200.00);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.01f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.01);
 
     // Case #2: Android Metadata bundle value is too low.
     bundle = new Bundle();
-    bundle.putFloat("sessions_sampling_percentage", -1.00f);
+    bundle.putDouble("sessions_sampling_percentage", -1.00);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.01f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.01);
   }
 
   @Test
   public void getSessionsSamplingRate_invalidAndroidMetadataBundle_returnRemoteConfigValue() {
-    when(mockRemoteConfigManager.getFloat(SESSION_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.25f));
+    when(mockRemoteConfigManager.getDouble(SESSION_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.25));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.25f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.25);
 
     // Case #1: Android Metadata bundle value is too high.
     Bundle bundle = new Bundle();
-    bundle.putFloat("sessions_sampling_percentage", 200.00f);
+    bundle.putDouble("sessions_sampling_percentage", 200.00);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.25f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.25);
 
     // Case #2: Android Metadata bundle value is too low.
     bundle = new Bundle();
-    bundle.putFloat("sessions_sampling_percentage", -1.00f);
+    bundle.putDouble("sessions_sampling_percentage", -1.00);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.25f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.25);
   }
 
   @Test
   public void getSessionsSamplingRate_invalidMetadataBundle_returnCacheValue() {
-    when(mockRemoteConfigManager.getFloat(SESSION_SAMPLING_RATE_FRC_KEY))
+    when(mockRemoteConfigManager.getDouble(SESSION_SAMPLING_RATE_FRC_KEY))
         .thenReturn(Optional.absent());
-    when(mockDeviceCacheManager.getFloat(SESSION_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(1.0f));
+    when(mockDeviceCacheManager.getDouble(SESSION_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(1.0));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(1.0f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(1.0);
 
     // Case #1: Android Metadata bundle value is too high.
     Bundle bundle = new Bundle();
-    bundle.putFloat("sessions_sampling_percentage", 200.00f);
+    bundle.putDouble("sessions_sampling_percentage", 200.00);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(1.0f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(1.0);
 
     // Case #2: Android Metadata bundle value is too low.
     bundle = new Bundle();
-    bundle.putFloat("sessions_sampling_percentage", -1.00f);
+    bundle.putDouble("sessions_sampling_percentage", -1.00);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(1.0f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(1.0);
   }
 
   @Test
   public void getSessionsSamplingRate_validRemoteConfig_returnRemoteConfigValue() {
-    when(mockRemoteConfigManager.getFloat(SESSION_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.25f));
+    when(mockRemoteConfigManager.getDouble(SESSION_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.25));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.25f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.25);
     verify(mockDeviceCacheManager, times(1))
-        .setValue(eq(SESSION_SAMPLING_RATE_CACHE_KEY), eq(0.25f));
+        .setValue(eq(SESSION_SAMPLING_RATE_CACHE_KEY), eq(0.25));
 
-    when(mockRemoteConfigManager.getFloat(SESSION_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.0f));
+    when(mockRemoteConfigManager.getDouble(SESSION_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.0));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.0f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.0);
+    verify(mockDeviceCacheManager, times(1)).setValue(eq(SESSION_SAMPLING_RATE_CACHE_KEY), eq(0.0));
+
+    when(mockRemoteConfigManager.getDouble(SESSION_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.00005));
+
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.00005);
     verify(mockDeviceCacheManager, times(1))
-        .setValue(eq(SESSION_SAMPLING_RATE_CACHE_KEY), eq(0.0f));
+        .setValue(eq(SESSION_SAMPLING_RATE_CACHE_KEY), eq(0.00005));
 
-    when(mockRemoteConfigManager.getFloat(SESSION_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.00005f));
+    when(mockRemoteConfigManager.getDouble(SESSION_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.0000000001));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.00005f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.0000000001);
     verify(mockDeviceCacheManager, times(1))
-        .setValue(eq(SESSION_SAMPLING_RATE_CACHE_KEY), eq(0.00005f));
-
-    when(mockRemoteConfigManager.getFloat(SESSION_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.0000000001f));
-
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.0000000001f);
-    verify(mockDeviceCacheManager, times(1))
-        .setValue(eq(SESSION_SAMPLING_RATE_CACHE_KEY), eq(0.0000000001f));
+        .setValue(eq(SESSION_SAMPLING_RATE_CACHE_KEY), eq(0.0000000001));
   }
 
   @Test
   public void getSessionsSamplingRate_invalidRemoteConfig_returnDefaultValue() {
     // Mock behavior that device cache doesn't have session sampling rate value.
-    when(mockDeviceCacheManager.getFloat(SESSION_SAMPLING_RATE_CACHE_KEY))
+    when(mockDeviceCacheManager.getDouble(SESSION_SAMPLING_RATE_CACHE_KEY))
         .thenReturn(Optional.absent());
 
     // Case #1: Firebase Remote Config value is too high.
-    when(mockRemoteConfigManager.getFloat(SESSION_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(1.01f));
+    when(mockRemoteConfigManager.getDouble(SESSION_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(1.01));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.01f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.01);
     verify(mockDeviceCacheManager, never()).setValue(any(), any());
 
     // Case #2: Firebase Remote Config value is too low.
-    when(mockRemoteConfigManager.getFloat(SESSION_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(-0.1f));
+    when(mockRemoteConfigManager.getDouble(SESSION_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(-0.1));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.01f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.01);
     verify(mockDeviceCacheManager, never()).setValue(any(), any());
   }
 
   @Test
   public void getSessionsSamplingRate_invalidRemoteConfig_returnCacheValue() {
     // Mock behavior that device cache doesn't have session sampling rate value.
-    when(mockDeviceCacheManager.getFloat(SESSION_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(0.25f));
+    when(mockDeviceCacheManager.getDouble(SESSION_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(0.25));
 
     // Case #1: Firebase Remote Config value is too high.
-    when(mockRemoteConfigManager.getFloat(SESSION_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(1.01f));
+    when(mockRemoteConfigManager.getDouble(SESSION_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(1.01));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.25f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.25);
     verify(mockDeviceCacheManager, never()).setValue(any(), any());
 
     // Case #2: Firebase Remote Config value is too low.
-    when(mockRemoteConfigManager.getFloat(SESSION_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(-0.1f));
+    when(mockRemoteConfigManager.getDouble(SESSION_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(-0.1));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.25f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.25);
     verify(mockDeviceCacheManager, never()).setValue(any(), any());
   }
 
   @Test
-  public void getSessionsSamplingRate_validCache_returnCacheValue() {
-    when(mockDeviceCacheManager.getFloat(SESSION_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(1.0f));
+  public void getSessionsSamplingRate_remoteConfigFetchFailed_returnsRCFailureDefault() {
+    when(mockDeviceCacheManager.getDouble(SESSION_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.absent());
+    when(mockRemoteConfigManager.getDouble(SESSION_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.absent());
+    when(mockRemoteConfigManager.isLastFetchFailed()).thenReturn(true);
 
-    when(mockRemoteConfigManager.getFloat(SESSION_SAMPLING_RATE_FRC_KEY))
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.01 / 1000);
+  }
+
+  @Test
+  public void getSessionsSamplingRate_validCache_returnCacheValue() {
+    when(mockDeviceCacheManager.getDouble(SESSION_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(1.0));
+
+    when(mockRemoteConfigManager.getDouble(SESSION_SAMPLING_RATE_FRC_KEY))
         .thenReturn(Optional.absent());
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(1.0f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(1.0);
   }
 
   @Test
   public void getSessionsSamplingRate_invalidCache_returnDefaultValue() {
     // Mock behavior that remote config doesn't have session sampling rate value.
-    when(mockRemoteConfigManager.getFloat(SESSION_SAMPLING_RATE_FRC_KEY))
+    when(mockRemoteConfigManager.getDouble(SESSION_SAMPLING_RATE_FRC_KEY))
         .thenReturn(Optional.absent());
 
     // Case #1: Device Cache value is too high.
-    when(mockDeviceCacheManager.getFloat(SESSION_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(10.0f));
+    when(mockDeviceCacheManager.getDouble(SESSION_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(10.0));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.01f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.01);
 
     // Case #2: Device Cache value is too low.
-    when(mockDeviceCacheManager.getFloat(SESSION_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(-1.0f));
+    when(mockDeviceCacheManager.getDouble(SESSION_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(-1.0));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.01f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.01);
   }
 
   @Test
   public void
       getSessionsSamplingRate_metadataAndRemoteConfigAndCacheAreSet_metadataHasHighestConfigPrecedence() {
     // Set cache value.
-    when(mockDeviceCacheManager.getFloat(SESSION_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(0.2f));
+    when(mockDeviceCacheManager.getDouble(SESSION_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(0.2));
 
     // Set remote config value.
-    when(mockRemoteConfigManager.getFloat(SESSION_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.3f));
+    when(mockRemoteConfigManager.getDouble(SESSION_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.3));
 
     // Set Android Manifest value.
     Bundle bundle = new Bundle();
-    bundle.putFloat("sessions_sampling_percentage", 4.0f);
+    bundle.putDouble("sessions_sampling_percentage", 4.0);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.04f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.04);
   }
 
   @Test
   public void
       getSessionsSamplingRate_remoteConfigAndCacheAreSet_remoteConfigHasHighestConfigPrecedence() {
     // Set cache value.
-    when(mockDeviceCacheManager.getFloat(SESSION_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(0.2f));
+    when(mockDeviceCacheManager.getDouble(SESSION_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(0.2));
 
     // Set remote config value.
-    when(mockRemoteConfigManager.getFloat(SESSION_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.3f));
+    when(mockRemoteConfigManager.getDouble(SESSION_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.3));
 
-    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.3f);
+    assertThat(testConfigResolver.getSessionsSamplingRate()).isEqualTo(0.3);
   }
 
   @Test
@@ -2295,70 +2212,6 @@ public class ConfigResolverTest extends FirebasePerformanceTestBase {
     verify(mockDeviceCacheManager, never()).setValue(anyString(), anyLong());
   }
 
-  @Test
-  public void getAndCacheLogSourceName_noRemoteConfigOrCacheValue_returnsDefaultButNotSaveCache() {
-    ReflectionHelpers.setStaticField(BuildConfig.class, "TRANSPORT_LOG_SRC", "FIREPERF");
-    ReflectionHelpers.setStaticField(
-        BuildConfig.class, "ENFORCE_DEFAULT_LOG_SRC", Boolean.valueOf(false));
-
-    when(mockRemoteConfigManager.getRemoteConfigValueOrDefault("fpr_log_source", -1L))
-        .thenReturn(-1L);
-    when(mockDeviceCacheManager.getString("com.google.firebase.perf.LogSourceName"))
-        .thenReturn(Optional.of("FIREPERF"));
-
-    assertThat(testConfigResolver.getAndCacheLogSourceName()).isEqualTo("FIREPERF");
-    // Default value is saved at device cache because it can always read from build constant.
-    verify(mockDeviceCacheManager, never())
-        .setValue(eq("com.google.firebase.perf.LogSourceName"), anyString());
-  }
-
-  @Test
-  public void getAndCacheLogSourceName_notNullCacheValue_returnsCache() {
-    ReflectionHelpers.setStaticField(BuildConfig.class, "TRANSPORT_LOG_SRC", "FIREPERF");
-    ReflectionHelpers.setStaticField(
-        BuildConfig.class, "ENFORCE_DEFAULT_LOG_SRC", Boolean.valueOf(false));
-
-    when(mockRemoteConfigManager.getRemoteConfigValueOrDefault("fpr_log_source", -1L))
-        .thenReturn(-1L);
-    when(mockDeviceCacheManager.getString("com.google.firebase.perf.LogSourceName"))
-        .thenReturn(Optional.of("FIREPERF_INTERNAL_LOW"));
-
-    assertThat(testConfigResolver.getAndCacheLogSourceName()).isEqualTo("FIREPERF_INTERNAL_LOW");
-    verify(mockDeviceCacheManager, never())
-        .setValue(eq("com.google.firebase.perf.LogSourceName"), anyString());
-  }
-
-  @Test
-  public void getAndCacheLogSourceName_nullCacheValue_returnsDefault() {
-    ReflectionHelpers.setStaticField(BuildConfig.class, "TRANSPORT_LOG_SRC", "FIREPERF");
-    ReflectionHelpers.setStaticField(
-        BuildConfig.class, "ENFORCE_DEFAULT_LOG_SRC", Boolean.valueOf(false));
-
-    when(mockRemoteConfigManager.getRemoteConfigValueOrDefault("fpr_log_source", -1L))
-        .thenReturn(-1L);
-    when(mockDeviceCacheManager.getString("com.google.firebase.perf.LogSourceName"))
-        .thenReturn(Optional.absent());
-
-    assertThat(testConfigResolver.getAndCacheLogSourceName()).isEqualTo("FIREPERF");
-    verify(mockDeviceCacheManager, never())
-        .setValue(eq("com.google.firebase.perf.LogSourceName"), anyString());
-  }
-
-  @Test
-  public void getAndCacheLogSourceName_defaultValueIsNotFireperf_returnsNewDefault() {
-    ReflectionHelpers.setStaticField(
-        BuildConfig.class, "TRANSPORT_LOG_SRC", "FIREPERF_INTERNAL_HIGH");
-    ReflectionHelpers.setStaticField(
-        BuildConfig.class, "ENFORCE_DEFAULT_LOG_SRC", Boolean.valueOf(false));
-
-    when(mockRemoteConfigManager.getRemoteConfigValueOrDefault("fpr_log_source", -1L))
-        .thenReturn(-1L);
-    when(mockDeviceCacheManager.getString("com.google.firebase.perf.LogSourceName"))
-        .thenReturn(Optional.of("FIREPERF_INTERNAL_HIGH"));
-
-    assertThat(testConfigResolver.getAndCacheLogSourceName()).isEqualTo("FIREPERF_INTERNAL_HIGH");
-  }
-
   // TODO: Commenting out the Flaky test.
   //  This test is failing sometimes because when ":test" is run ReflectionHelpers is not able to
   //  reflectively modify the static fields for "BuildConfig.class". Running ":testDebugUnitTest"
@@ -2382,159 +2235,52 @@ public class ConfigResolverTest extends FirebasePerformanceTestBase {
   //  }
 
   @Test
-  public void getAndCacheLogSourceName_getFromRemoteConfig_returnsCacheAtNextTime() {
-    ReflectionHelpers.setStaticField(BuildConfig.class, "TRANSPORT_LOG_SRC", "FIREPERF");
-    ReflectionHelpers.setStaticField(
-        BuildConfig.class, "ENFORCE_DEFAULT_LOG_SRC", Boolean.valueOf(false));
-
-    // #1 call: valid remote config value is returned, therefore returns this value and store at
-    // cache.
-    when(mockRemoteConfigManager.getRemoteConfigValueOrDefault("fpr_log_source", -1L))
-        .thenReturn(675L); // FIREPERF_INTERNAL_LOW
-
-    assertThat(testConfigResolver.getAndCacheLogSourceName()).isEqualTo("FIREPERF_INTERNAL_LOW");
-    verify(mockDeviceCacheManager, never()).getString(eq("com.google.firebase.perf.LogSourceName"));
-    verify(mockDeviceCacheManager, times(1))
-        .setValue(eq("com.google.firebase.perf.LogSourceName"), eq("FIREPERF_INTERNAL_LOW"));
-
-    // #2 call: There is no remote config value, therefore returns value stored at cache.
-    when(mockRemoteConfigManager.getRemoteConfigValueOrDefault("fpr_log_source", -1L))
-        .thenReturn(-1L);
-    when(mockDeviceCacheManager.getString("com.google.firebase.perf.LogSourceName"))
-        .thenReturn(Optional.of("FIREPERF_INTERNAL_LOW"));
-
-    assertThat(testConfigResolver.getAndCacheLogSourceName()).isEqualTo("FIREPERF_INTERNAL_LOW");
-    verify(mockDeviceCacheManager, times(1))
-        .getString(eq("com.google.firebase.perf.LogSourceName"));
-    verify(mockDeviceCacheManager, never())
-        .setValue(eq("com.google.firebase.perf.LogSourceName"), eq("FIREPERF"));
-  }
-
-  @Test
-  public void getAndCacheLogSourceName_cacheExistsAndGetNewFromRemoteConfig_cacheUpdated() {
-    ReflectionHelpers.setStaticField(BuildConfig.class, "TRANSPORT_LOG_SRC", "FIREPERF");
-    ReflectionHelpers.setStaticField(
-        BuildConfig.class, "ENFORCE_DEFAULT_LOG_SRC", Boolean.valueOf(false));
-
-    // #1 call: valid remote config value is returned, therefore returns this value and store at
-    // cache.
-    when(mockRemoteConfigManager.getRemoteConfigValueOrDefault("fpr_log_source", -1L))
-        .thenReturn(461L); // FIREPERF_AUTOPUSH
-
-    assertThat(testConfigResolver.getAndCacheLogSourceName()).isEqualTo("FIREPERF_AUTOPUSH");
-    verify(mockDeviceCacheManager, never()).getString(eq("com.google.firebase.perf.LogSourceName"));
-    verify(mockDeviceCacheManager, times(1))
-        .setValue(eq("com.google.firebase.perf.LogSourceName"), eq("FIREPERF_AUTOPUSH"));
-
-    // #2 call: There is new remote config value, therefore saves new value stored at cache.
-    when(mockRemoteConfigManager.getRemoteConfigValueOrDefault("fpr_log_source", -1L))
-        .thenReturn(675L); // FIREPERF_INTERNAL_LOW
-    when(mockDeviceCacheManager.getString("com.google.firebase.perf.LogSourceName"))
-        .thenReturn(Optional.of("FIREPERF_INTERNAL_LOW"));
-
-    // #3 call: There is no remote config value, returns updated value stored at cache.
-    assertThat(testConfigResolver.getAndCacheLogSourceName()).isEqualTo("FIREPERF_INTERNAL_LOW");
-    verify(mockDeviceCacheManager, never()).getString(eq("com.google.firebase.perf.LogSourceName"));
-    verify(mockDeviceCacheManager, times(1))
-        .setValue(eq("com.google.firebase.perf.LogSourceName"), eq("FIREPERF_INTERNAL_LOW"));
-  }
-
-  @Test
-  public void getAndCacheLogSourceName_invalidRemoteConfigData_returnsDefault() {
-    ReflectionHelpers.setStaticField(BuildConfig.class, "TRANSPORT_LOG_SRC", "FIREPERF");
-    ReflectionHelpers.setStaticField(
-        BuildConfig.class, "ENFORCE_DEFAULT_LOG_SRC", Boolean.valueOf(false));
-
-    when(mockRemoteConfigManager.getRemoteConfigValueOrDefault("fpr_log_source", -1L))
-        .thenReturn(123L); // invalid log source.
-    when(mockDeviceCacheManager.getString("com.google.firebase.perf.LogSourceName"))
-        .thenReturn(Optional.of("FIREPERF"));
-
-    assertThat(testConfigResolver.getAndCacheLogSourceName()).isEqualTo("FIREPERF");
-    verify(mockDeviceCacheManager, never())
-        .setValue(eq("com.google.firebase.perf.LogSourceName"), anyString());
-  }
-
-  @Test
-  public void getAndCacheLogSourceName_invalidRemoteConfigData_returnsCache() {
-    ReflectionHelpers.setStaticField(BuildConfig.class, "TRANSPORT_LOG_SRC", "FIREPERF");
-    ReflectionHelpers.setStaticField(
-        BuildConfig.class, "ENFORCE_DEFAULT_LOG_SRC", Boolean.valueOf(false));
-
-    when(mockRemoteConfigManager.getRemoteConfigValueOrDefault("fpr_log_source", -1L))
-        .thenReturn(123L); // invalid log source.
-    when(mockDeviceCacheManager.getString("com.google.firebase.perf.LogSourceName"))
-        .thenReturn(Optional.of("FIREPERF_AUTOPUSH"));
-
-    assertThat(testConfigResolver.getAndCacheLogSourceName()).isEqualTo("FIREPERF_AUTOPUSH");
-    verify(mockDeviceCacheManager, never())
-        .setValue(eq("com.google.firebase.perf.LogSourceName"), anyString());
-  }
-
-  @Test
-  public void
-      getAndCacheLogSourceName_bothRemoteConfigAndCacheExist_returnsAndCacheRemoteConfigData() {
-    ReflectionHelpers.setStaticField(BuildConfig.class, "TRANSPORT_LOG_SRC", "FIREPERF");
-    ReflectionHelpers.setStaticField(
-        BuildConfig.class, "ENFORCE_DEFAULT_LOG_SRC", Boolean.valueOf(false));
-
-    when(mockRemoteConfigManager.getRemoteConfigValueOrDefault("fpr_log_source", -1L))
-        .thenReturn(675L); // FIREPERF_INTERNAL_LOW.
-    when(mockDeviceCacheManager.getString("com.google.firebase.perf.LogSourceName"))
-        .thenReturn(Optional.of("FIREPERF_INTERNAL_HIGH"));
-
-    assertThat(testConfigResolver.getAndCacheLogSourceName()).isEqualTo("FIREPERF_INTERNAL_LOW");
-    verify(mockDeviceCacheManager, times(1))
-        .setValue(eq("com.google.firebase.perf.LogSourceName"), eq("FIREPERF_INTERNAL_LOW"));
-  }
-
-  @Test
   public void getFragmentSamplingRate_validMetadata_returnsMetadata() {
     // #1 pass: Validate that method returns Remote Config Value when there is no metadata value.
-    when(mockRemoteConfigManager.getFloat(FRAGMENT_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.01f));
+    when(mockRemoteConfigManager.getDouble(FRAGMENT_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.01));
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.01f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.01);
 
     // #2 pass: Validate that method returns Metadata value which takes higher precedence.
     Bundle bundle = new Bundle();
-    bundle.putFloat("fragment_sampling_percentage", 20.0f);
+    bundle.putDouble("fragment_sampling_percentage", 20.0);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.2f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.2);
   }
 
   @Test
   public void getFragmentSamplingRate_validMetadata_notSaveMetadataInCache() {
     Bundle bundle = new Bundle();
-    bundle.putFloat("fragment_sampling_percentage", 20.0f);
+    bundle.putDouble("fragment_sampling_percentage", 20.0);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.2f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.2);
 
     verify(mockDeviceCacheManager, never()).setValue(any(), any());
   }
 
   @Test
   public void getFragmentSamplingRate_invalidAndroidMetadataBundle_returnDefaultValue() {
-    Float defaultValue = ConfigurationConstants.FragmentSamplingRate.getInstance().getDefault();
-    when(mockRemoteConfigManager.getFloat(FRAGMENT_SAMPLING_RATE_FRC_KEY))
+    double defaultValue = ConfigurationConstants.FragmentSamplingRate.getInstance().getDefault();
+    when(mockRemoteConfigManager.getDouble(FRAGMENT_SAMPLING_RATE_FRC_KEY))
         .thenReturn(Optional.absent());
-    when(mockDeviceCacheManager.getFloat(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
+    when(mockDeviceCacheManager.getDouble(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
         .thenReturn(Optional.absent());
 
     assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(defaultValue);
 
     // Case #1: Android Metadata bundle value is too high.
     Bundle bundle = new Bundle();
-    bundle.putFloat("fragment_sampling_percentage", 200.00f);
+    bundle.putDouble("fragment_sampling_percentage", 200.00);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
     assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(defaultValue);
 
     // Case #2: Android Metadata bundle value is too low.
     bundle = new Bundle();
-    bundle.putFloat("fragment_sampling_percentage", -1.00f);
+    bundle.putDouble("fragment_sampling_percentage", -1.00);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
     assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(defaultValue);
@@ -2542,98 +2288,98 @@ public class ConfigResolverTest extends FirebasePerformanceTestBase {
 
   @Test
   public void getFragmentSamplingRate_invalidAndroidMetadataBundle_returnRemoteConfigValue() {
-    when(mockRemoteConfigManager.getFloat(FRAGMENT_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.25f));
+    when(mockRemoteConfigManager.getDouble(FRAGMENT_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.25));
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.25f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.25);
 
     // Case #1: Android Metadata bundle value is too high.
     Bundle bundle = new Bundle();
-    bundle.putFloat("fragment_sampling_percentage", 200.00f);
+    bundle.putDouble("fragment_sampling_percentage", 200.00);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.25f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.25);
 
     // Case #2: Android Metadata bundle value is too low.
     bundle = new Bundle();
-    bundle.putFloat("fragment_sampling_percentage", -1.00f);
+    bundle.putDouble("fragment_sampling_percentage", -1.00);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.25f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.25);
   }
 
   @Test
   public void getFragmentSamplingRate_invalidMetadataBundle_returnCacheValue() {
-    when(mockRemoteConfigManager.getFloat(FRAGMENT_SAMPLING_RATE_FRC_KEY))
+    when(mockRemoteConfigManager.getDouble(FRAGMENT_SAMPLING_RATE_FRC_KEY))
         .thenReturn(Optional.absent());
-    when(mockDeviceCacheManager.getFloat(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(1.0f));
+    when(mockDeviceCacheManager.getDouble(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(1.0));
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(1.0f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(1.0);
 
     // Case #1: Android Metadata bundle value is too high.
     Bundle bundle = new Bundle();
-    bundle.putFloat("fragment_sampling_percentage", 200.00f);
+    bundle.putDouble("fragment_sampling_percentage", 200.00);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(1.0f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(1.0);
 
     // Case #2: Android Metadata bundle value is too low.
     bundle = new Bundle();
-    bundle.putFloat("fragment_sampling_percentage", -1.00f);
+    bundle.putDouble("fragment_sampling_percentage", -1.00);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(1.0f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(1.0);
   }
 
   @Test
   public void getFragmentSamplingRate_validRemoteConfig_returnRemoteConfigValue() {
-    when(mockRemoteConfigManager.getFloat(FRAGMENT_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.25f));
+    when(mockRemoteConfigManager.getDouble(FRAGMENT_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.25));
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.25f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.25);
     verify(mockDeviceCacheManager, times(1))
-        .setValue(eq(FRAGMENT_SAMPLING_RATE_CACHE_KEY), eq(0.25f));
+        .setValue(eq(FRAGMENT_SAMPLING_RATE_CACHE_KEY), eq(0.25));
 
-    when(mockRemoteConfigManager.getFloat(FRAGMENT_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.0f));
+    when(mockRemoteConfigManager.getDouble(FRAGMENT_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.0));
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.0f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.0);
     verify(mockDeviceCacheManager, times(1))
-        .setValue(eq(FRAGMENT_SAMPLING_RATE_CACHE_KEY), eq(0.0f));
+        .setValue(eq(FRAGMENT_SAMPLING_RATE_CACHE_KEY), eq(0.0));
 
-    when(mockRemoteConfigManager.getFloat(FRAGMENT_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.00005f));
+    when(mockRemoteConfigManager.getDouble(FRAGMENT_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.00005));
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.00005f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.00005);
     verify(mockDeviceCacheManager, times(1))
-        .setValue(eq(FRAGMENT_SAMPLING_RATE_CACHE_KEY), eq(0.00005f));
+        .setValue(eq(FRAGMENT_SAMPLING_RATE_CACHE_KEY), eq(0.00005));
 
-    when(mockRemoteConfigManager.getFloat(FRAGMENT_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.0000000001f));
+    when(mockRemoteConfigManager.getDouble(FRAGMENT_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.0000000001));
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.0000000001f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.0000000001);
     verify(mockDeviceCacheManager, times(1))
-        .setValue(eq(FRAGMENT_SAMPLING_RATE_CACHE_KEY), eq(0.0000000001f));
+        .setValue(eq(FRAGMENT_SAMPLING_RATE_CACHE_KEY), eq(0.0000000001));
   }
 
   @Test
   public void getFragmentSamplingRate_invalidRemoteConfig_returnDefaultValue() {
-    Float defaultValue = ConfigurationConstants.FragmentSamplingRate.getInstance().getDefault();
+    double defaultValue = ConfigurationConstants.FragmentSamplingRate.getInstance().getDefault();
     // Mock behavior that device cache doesn't have session sampling rate value.
-    when(mockDeviceCacheManager.getFloat(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
+    when(mockDeviceCacheManager.getDouble(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
         .thenReturn(Optional.absent());
 
     // Case #1: Firebase Remote Config value is too high.
-    when(mockRemoteConfigManager.getFloat(FRAGMENT_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(1.01f));
+    when(mockRemoteConfigManager.getDouble(FRAGMENT_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(1.01));
 
     assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(defaultValue);
     verify(mockDeviceCacheManager, never()).setValue(any(), any());
 
     // Case #2: Firebase Remote Config value is too low.
-    when(mockRemoteConfigManager.getFloat(FRAGMENT_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(-0.1f));
+    when(mockRemoteConfigManager.getDouble(FRAGMENT_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(-0.1));
 
     assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(defaultValue);
     verify(mockDeviceCacheManager, never()).setValue(any(), any());
@@ -2642,51 +2388,51 @@ public class ConfigResolverTest extends FirebasePerformanceTestBase {
   @Test
   public void getFragmentSamplingRate_invalidRemoteConfig_returnCacheValue() {
     // Mock behavior that device cache doesn't have session sampling rate value.
-    when(mockDeviceCacheManager.getFloat(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(0.25f));
+    when(mockDeviceCacheManager.getDouble(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(0.25));
 
     // Case #1: Firebase Remote Config value is too high.
-    when(mockRemoteConfigManager.getFloat(FRAGMENT_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(1.01f));
+    when(mockRemoteConfigManager.getDouble(FRAGMENT_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(1.01));
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.25f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.25);
     verify(mockDeviceCacheManager, never()).setValue(any(), any());
 
     // Case #2: Firebase Remote Config value is too low.
-    when(mockRemoteConfigManager.getFloat(FRAGMENT_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(-0.1f));
+    when(mockRemoteConfigManager.getDouble(FRAGMENT_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(-0.1));
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.25f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.25);
     verify(mockDeviceCacheManager, never()).setValue(any(), any());
   }
 
   @Test
   public void getFragmentSamplingRate_validCache_returnCacheValue() {
-    when(mockDeviceCacheManager.getFloat(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(1.0f));
+    when(mockDeviceCacheManager.getDouble(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(1.0));
 
-    when(mockRemoteConfigManager.getFloat(FRAGMENT_SAMPLING_RATE_FRC_KEY))
+    when(mockRemoteConfigManager.getDouble(FRAGMENT_SAMPLING_RATE_FRC_KEY))
         .thenReturn(Optional.absent());
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(1.0f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(1.0);
   }
 
   @Test
   public void getFragmentSamplingRate_invalidCache_returnDefaultValue() {
-    Float defaultValue = ConfigurationConstants.FragmentSamplingRate.getInstance().getDefault();
+    double defaultValue = ConfigurationConstants.FragmentSamplingRate.getInstance().getDefault();
     // Mock behavior that remote config doesn't have session sampling rate value.
-    when(mockRemoteConfigManager.getFloat(FRAGMENT_SAMPLING_RATE_FRC_KEY))
+    when(mockRemoteConfigManager.getDouble(FRAGMENT_SAMPLING_RATE_FRC_KEY))
         .thenReturn(Optional.absent());
 
     // Case #1: Device Cache value is too high.
-    when(mockDeviceCacheManager.getFloat(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(10.0f));
+    when(mockDeviceCacheManager.getDouble(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(10.0));
 
     assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(defaultValue);
 
     // Case #2: Device Cache value is too low.
-    when(mockDeviceCacheManager.getFloat(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(-1.0f));
+    when(mockDeviceCacheManager.getDouble(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(-1.0));
 
     assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(defaultValue);
   }
@@ -2695,32 +2441,49 @@ public class ConfigResolverTest extends FirebasePerformanceTestBase {
   public void
       getFragmentSamplingRate_metadataAndRemoteConfigAndCacheAreSet_metadataHasHighestConfigPrecedence() {
     // Set cache value.
-    when(mockDeviceCacheManager.getFloat(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(0.2f));
+    when(mockDeviceCacheManager.getDouble(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(0.2));
 
     // Set remote config value.
-    when(mockRemoteConfigManager.getFloat(FRAGMENT_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.3f));
+    when(mockRemoteConfigManager.getDouble(FRAGMENT_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.3));
 
     // Set Android Manifest value.
     Bundle bundle = new Bundle();
-    bundle.putFloat("fragment_sampling_percentage", 4.0f);
+    bundle.putDouble("fragment_sampling_percentage", 4.0);
     testConfigResolver.setMetadataBundle(new ImmutableBundle(bundle));
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.04f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.04);
   }
 
   @Test
   public void
       getFragmentSamplingRate_remoteConfigAndCacheAreSet_remoteConfigHasHighestConfigPrecedence() {
     // Set cache value.
-    when(mockDeviceCacheManager.getFloat(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
-        .thenReturn(Optional.of(0.2f));
+    when(mockDeviceCacheManager.getDouble(FRAGMENT_SAMPLING_RATE_CACHE_KEY))
+        .thenReturn(Optional.of(0.2));
 
     // Set remote config value.
-    when(mockRemoteConfigManager.getFloat(FRAGMENT_SAMPLING_RATE_FRC_KEY))
-        .thenReturn(Optional.of(0.3f));
+    when(mockRemoteConfigManager.getDouble(FRAGMENT_SAMPLING_RATE_FRC_KEY))
+        .thenReturn(Optional.of(0.3));
 
-    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.3f);
+    assertThat(testConfigResolver.getFragmentSamplingRate()).isEqualTo(0.3);
+  }
+
+  private static void setStaticFinalField(Class clazz, String fieldName, Object value) {
+    try {
+      Field field = clazz.getDeclaredField(fieldName);
+      if (field != null) {
+        field.setAccessible(true);
+
+        Field modifiersField = Field.class.getDeclaredField("modifiers");
+        modifiersField.setAccessible(true);
+        modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
+
+        field.set(null, value);
+      }
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
   }
 }

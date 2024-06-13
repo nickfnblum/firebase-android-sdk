@@ -26,8 +26,8 @@ import java.util.Iterator;
 import java.util.List;
 
 /**
- * A {@code QuerySnapshot} contains the results of a query. It can contain zero or more {@link
- * DocumentSnapshot} objects.
+ * A {@code QuerySnapshot} contains the results of a query. <br>
+ * It can contain zero or more {@link DocumentSnapshot} objects.
  *
  * <p><b>Subclassing Note</b>: Cloud Firestore classes are not meant to be subclassed except for use
  * in test mocks. Subclassing is not supported in production code and new SDK releases may break
@@ -105,7 +105,7 @@ public class QuerySnapshot implements Iterable<QueryDocumentSnapshot> {
    * Returns the list of documents that changed since the last snapshot. If it's the first snapshot
    * all documents will be in the list as added changes.
    *
-   * @param metadataChanges Indicates whether metadata-only changes (i.e. only {@code
+   * @param metadataChanges Indicates whether metadata-only changes (specifically, only {@code
    *     DocumentSnapshot.getMetadata()} changed) should be included.
    * @return The list of document changes since the last snapshot.
    */

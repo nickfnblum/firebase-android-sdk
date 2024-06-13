@@ -16,6 +16,7 @@ package com.google.firebase.database;
 
 import android.content.Context;
 import androidx.test.platform.app.InstrumentationRegistry;
+import com.google.android.gms.common.internal.StringResourceValueReader;
 
 public class IntegrationTestValues {
   private static final String TEST_ALT_NAMESPACE = "https://test.firebaseio.com";
@@ -24,9 +25,19 @@ public class IntegrationTestValues {
 
   private IntegrationTestValues() {}
 
+  public static String getDatabaseUrl() {
+    return getResource("firebase_database_url");
+  }
+
   public static String getNamespace() {
-    Context c = InstrumentationRegistry.getInstrumentation().getContext();
-    return c.getResources().getString(R.string.firebase_database_url);
+    String dbUrl = getDatabaseUrl();
+    String namespaceWithScheme = dbUrl.substring(0, dbUrl.indexOf('.'));
+    return namespaceWithScheme.substring(namespaceWithScheme.lastIndexOf("/") + 1);
+  }
+
+  public static String getHostname() {
+    String dbUrl = getDatabaseUrl();
+    return dbUrl.substring(dbUrl.lastIndexOf("/") + 1);
   }
 
   public static String getAltNamespace() {
@@ -34,8 +45,7 @@ public class IntegrationTestValues {
   }
 
   public static String getProjectId() {
-    Context c = InstrumentationRegistry.getInstrumentation().getContext();
-    return c.getResources().getString(R.string.project_id);
+    return getResource("project_id");
   }
 
   public static long getTimeout() {
@@ -44,5 +54,10 @@ public class IntegrationTestValues {
 
   public static String getServer() {
     return TEST_SERVER;
+  }
+
+  private static String getResource(String name) {
+    Context currentContext = InstrumentationRegistry.getInstrumentation().getContext();
+    return new StringResourceValueReader(currentContext).getString(name);
   }
 }

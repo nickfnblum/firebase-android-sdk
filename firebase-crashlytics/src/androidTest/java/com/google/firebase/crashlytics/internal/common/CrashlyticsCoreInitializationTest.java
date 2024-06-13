@@ -31,6 +31,7 @@ import com.google.firebase.crashlytics.internal.CrashlyticsNativeComponent;
 import com.google.firebase.crashlytics.internal.CrashlyticsNativeComponentDeferredProxy;
 import com.google.firebase.crashlytics.internal.CrashlyticsTestCase;
 import com.google.firebase.crashlytics.internal.DevelopmentPlatformProvider;
+import com.google.firebase.crashlytics.internal.RemoteConfigDeferredProxy;
 import com.google.firebase.crashlytics.internal.analytics.UnavailableAnalyticsEventLogger;
 import com.google.firebase.crashlytics.internal.breadcrumbs.DisabledBreadcrumbSource;
 import com.google.firebase.crashlytics.internal.persistence.FileStore;
@@ -41,6 +42,8 @@ import com.google.firebase.inject.Deferred;
 import com.google.firebase.installations.FirebaseInstallationsApi;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 
 public class CrashlyticsCoreInitializationTest extends CrashlyticsTestCase {
@@ -134,7 +137,9 @@ public class CrashlyticsCoreInitializationTest extends CrashlyticsTestCase {
           new DisabledBreadcrumbSource(),
           new UnavailableAnalyticsEventLogger(),
           fileStore,
-          crashHandlerExecutor);
+          crashHandlerExecutor,
+          mock(CrashlyticsAppQualitySessionsSubscriber.class),
+          mock(RemoteConfigDeferredProxy.class));
     }
   }
 
@@ -256,10 +261,13 @@ public class CrashlyticsCoreInitializationTest extends CrashlyticsTestCase {
   }
 
   private void setupAppData(String buildId) {
+    List<BuildIdInfo> buildIdInfoList = new ArrayList<>();
+    buildIdInfoList.add(new BuildIdInfo("lib.so", "x86", "aabb"));
     appData =
         new AppData(
             GOOGLE_APP_ID,
             buildId,
+            buildIdInfoList,
             "installerPackageName",
             "packageName",
             "versionCode",

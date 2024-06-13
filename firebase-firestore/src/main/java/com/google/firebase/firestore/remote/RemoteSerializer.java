@@ -20,6 +20,7 @@ import static com.google.firebase.firestore.util.Assert.hardAssert;
 import androidx.annotation.Nullable;
 import androidx.annotation.VisibleForTesting;
 import com.google.firebase.Timestamp;
+import com.google.firebase.firestore.AggregateField;
 import com.google.firebase.firestore.core.Bound;
 import com.google.firebase.firestore.core.FieldFilter;
 import com.google.firebase.firestore.core.Filter;
@@ -64,6 +65,7 @@ import com.google.firestore.v1.DocumentRemove;
 import com.google.firestore.v1.DocumentTransform;
 import com.google.firestore.v1.ListenResponse;
 import com.google.firestore.v1.ListenResponse.ResponseTypeCase;
+import com.google.firestore.v1.StructuredAggregationQuery;
 import com.google.firestore.v1.StructuredQuery;
 import com.google.firestore.v1.StructuredQuery.CollectionSelector;
 import com.google.firestore.v1.StructuredQuery.CompositeFilter;
@@ -200,7 +202,7 @@ public final class RemoteSerializer {
   /** Validates that a path has a prefix that looks like a valid encoded databaseId. */
   private static boolean isValidResourceName(ResourcePath path) {
     // Resource names have at least 4 components (project ID, database ID)
-    // and commonly the (root) resource type, e.g. documents
+    // and commonly the (root) resource type (for example, documents).
     return path.length() >= 4
         && path.getSegment(0).equals("projects")
         && path.getSegment(2).equals("databases");
@@ -471,6 +473,8 @@ public final class RemoteSerializer {
         return null;
       case EXISTENCE_FILTER_MISMATCH:
         return "existence-filter-mismatch";
+      case EXISTENCE_FILTER_MISMATCH_BLOOM:
+        return "existence-filter-mismatch-bloom";
       case LIMBO_RESOLUTION:
         return "limbo-document";
       default:
@@ -497,6 +501,12 @@ public final class RemoteSerializer {
       builder.setReadTime(encodeTimestamp(targetData.getSnapshotVersion().getTimestamp()));
     } else {
       builder.setResumeToken(targetData.getResumeToken());
+    }
+
+    if (targetData.getExpectedCount() != null
+        && (!targetData.getResumeToken().isEmpty()
+            || targetData.getSnapshotVersion().compareTo(SnapshotVersion.NONE) > 0)) {
+      builder.setExpectedCount(Int32Value.newBuilder().setValue(targetData.getExpectedCount()));
     }
 
     return builder.build();
@@ -630,6 +640,54 @@ public final class RemoteSerializer {
     return decodeQueryTarget(target.getParent(), target.getStructuredQuery());
   }
 
+  StructuredAggregationQuery encodeStructuredAggregationQuery(
+      QueryTarget encodedQueryTarget,
+      List<AggregateField> aggregateFields,
+      HashMap<String, String> aliasMap) {
+    StructuredAggregationQuery.Builder structuredAggregationQuery =
+        StructuredAggregationQuery.newBuilder();
+    structuredAggregationQuery.setStructuredQuery(encodedQueryTarget.getStructuredQuery());
+
+    List<StructuredAggregationQuery.Aggregation> aggregations = new ArrayList<>();
+
+    HashSet<String> uniqueFields = new HashSet<>();
+    int aliasID = 1;
+    for (AggregateField aggregateField : aggregateFields) {
+      // The code block below is used to deduplicate the same aggregate fields.
+      if (uniqueFields.contains(aggregateField.getAlias())) {
+        continue;
+      }
+      uniqueFields.add(aggregateField.getAlias());
+
+      String serverAlias = "aggregate_" + aliasID++;
+      aliasMap.put(serverAlias, aggregateField.getAlias());
+
+      StructuredAggregationQuery.Aggregation.Builder aggregation =
+          StructuredAggregationQuery.Aggregation.newBuilder();
+      StructuredQuery.FieldReference fieldPath =
+          StructuredQuery.FieldReference.newBuilder()
+              .setFieldPath(aggregateField.getFieldPath())
+              .build();
+
+      if (aggregateField instanceof AggregateField.CountAggregateField) {
+        aggregation.setCount(StructuredAggregationQuery.Aggregation.Count.getDefaultInstance());
+      } else if (aggregateField instanceof AggregateField.SumAggregateField) {
+        aggregation.setSum(
+            StructuredAggregationQuery.Aggregation.Sum.newBuilder().setField(fieldPath).build());
+      } else if (aggregateField instanceof AggregateField.AverageAggregateField) {
+        aggregation.setAvg(
+            StructuredAggregationQuery.Aggregation.Avg.newBuilder().setField(fieldPath).build());
+      } else {
+        throw new RuntimeException("Unsupported aggregation");
+      }
+
+      aggregation.setAlias(serverAlias);
+      aggregations.add(aggregation.build());
+    }
+    structuredAggregationQuery.addAllAggregations(aggregations);
+    return structuredAggregationQuery.build();
+  }
+
   // Filters
 
   private StructuredQuery.Filter encodeFilters(List<Filter> filters) {
@@ -643,9 +701,7 @@ public final class RemoteSerializer {
     Filter result = decodeFilter(proto);
 
     // Instead of a singletonList containing AND(F1, F2, ...), we can return a list containing F1,
-    // F2, ...
-    // TODO(orquery): Once proper support for composite filters has been completed, we can remove
-    // this flattening from here.
+    // F2, ... to stay consistent with the older SDK versions.
     if (result instanceof com.google.firebase.firestore.core.CompositeFilter) {
       com.google.firebase.firestore.core.CompositeFilter compositeFilter =
           (com.google.firebase.firestore.core.CompositeFilter) result;
@@ -701,8 +757,7 @@ public final class RemoteSerializer {
       case AND:
         return StructuredQuery.CompositeFilter.Operator.AND;
       case OR:
-        // TODO(orquery): Use OPERATOR_OR once it's available.
-        return StructuredQuery.CompositeFilter.Operator.OPERATOR_UNSPECIFIED;
+        return StructuredQuery.CompositeFilter.Operator.OR;
       default:
         throw fail("Unrecognized composite filter type.");
     }
@@ -713,8 +768,7 @@ public final class RemoteSerializer {
     switch (op) {
       case AND:
         return com.google.firebase.firestore.core.CompositeFilter.Operator.AND;
-        // TODO(orquery): Use OPERATOR_OR once it's available.
-      case OPERATOR_UNSPECIFIED:
+      case OR:
         return com.google.firebase.firestore.core.CompositeFilter.Operator.OR;
       default:
         throw fail("Only AND and OR composite filter types are supported.");
@@ -942,8 +996,8 @@ public final class RemoteSerializer {
         break;
       case FILTER:
         com.google.firestore.v1.ExistenceFilter protoFilter = protoChange.getFilter();
-        // TODO: implement existence filter parsing (see b/33076578)
-        ExistenceFilter filter = new ExistenceFilter(protoFilter.getCount());
+        ExistenceFilter filter =
+            new ExistenceFilter(protoFilter.getCount(), protoFilter.getUnchangedNames());
         int targetId = protoFilter.getTargetId();
         watchChange = new ExistenceFilterWatchChange(targetId, filter);
         break;
@@ -957,8 +1011,8 @@ public final class RemoteSerializer {
 
   public SnapshotVersion decodeVersionFromListenResponse(ListenResponse watchChange) {
     // We have only reached a consistent snapshot for the entire stream if there is a read_time set
-    // and it applies to all targets (i.e. the list of targets is empty). The backend is guaranteed
-    // to send such responses.
+    // and it applies to all targets (specifically, the list of targets is empty). The backend is
+    // guaranteed to send such responses.
     if (watchChange.getResponseTypeCase() != ResponseTypeCase.TARGET_CHANGE) {
       return SnapshotVersion.NONE;
     }

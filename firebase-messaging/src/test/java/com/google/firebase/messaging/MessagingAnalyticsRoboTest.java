@@ -86,6 +86,8 @@ public class MessagingAnalyticsRoboTest {
   private static final String MANIFEST_DELIVERY_METRICS_EXPORT_TO_BIG_QUERY_ENABLED =
       "delivery_metrics_exported_to_big_query_enabled";
 
+  private static final int DEFAULT_PRODUCT_ID = 111881503;
+
   private Context context;
 
   @Before
@@ -105,6 +107,9 @@ public class MessagingAnalyticsRoboTest {
 
     // Create and Initialize Firelog service components
     context = ApplicationProvider.getApplicationContext();
+
+    // Reset sharedpreferences for bigquery delivery metrics export before every test.
+    resetPreferencesField(DELIVERY_METRICS_EXPORT_TO_BIG_QUERY_PREF);
   }
 
   /** If the developer didn't include Analytics and Firelog, we should not crash. */
@@ -329,6 +334,13 @@ public class MessagingAnalyticsRoboTest {
     assertThat(MessagingAnalytics.deliveryMetricsExportToBigQueryEnabled()).isTrue();
     assertManifestFieldWithValue(MANIFEST_DELIVERY_METRICS_EXPORT_TO_BIG_QUERY_ENABLED, false);
     assertPreferencesFieldWithValue(DELIVERY_METRICS_EXPORT_TO_BIG_QUERY_PREF, true);
+  }
+
+  private void resetPreferencesField(String field) {
+    SharedPreferences preferences =
+        context.getSharedPreferences(FCM_PREFERENCES, Context.MODE_PRIVATE);
+
+    preferences.edit().remove(field).apply();
   }
 
   private void assertPreferencesFieldWithValue(String field, Boolean expectedValue) {
@@ -1047,7 +1059,7 @@ public class MessagingAnalyticsRoboTest {
   public void testLogNotificationReceived() throws Exception {
     MessagingAnalytics.setDeliveryMetricsExportToBigQuery(true);
     FakeFirelogTransport<MessagingClientEventExtension> transport = new FakeFirelogTransport<>();
-    FirebaseMessaging.transportFactory = new FakeFirelogTransportFactory(transport);
+    FirebaseMessaging.transportFactory = () -> new FakeFirelogTransportFactory(transport);
 
     Bundle b = new Bundle();
     b.putString(MessagePayloadKeys.TTL, "22223");
@@ -1063,7 +1075,8 @@ public class MessagingAnalyticsRoboTest {
     Intent intent = new Intent().putExtras(b);
     MessagingAnalytics.logNotificationReceived(intent);
 
-    MessagingClientEventExtension gotEvent = transport.eventQueue.poll().getPayload();
+    Event<MessagingClientEventExtension> event = transport.eventQueue.poll();
+    MessagingClientEventExtension gotEvent = event.getPayload();
     MessagingClientEventExtension wantEvent =
         MessagingClientEventExtension.newBuilder()
             .setMessagingClientEvent(
@@ -1071,13 +1084,49 @@ public class MessagingAnalyticsRoboTest {
                     MessagingClientEvent.Event.MESSAGE_DELIVERED, intent))
             .build();
     assertThat(gotEvent.toByteArray()).isEqualTo(wantEvent.toByteArray());
+    assertThat(event.getProductData()).isNotNull();
+    assertThat(event.getProductData().getProductId()).isEqualTo(DEFAULT_PRODUCT_ID);
+  }
+
+  @Test
+  public void testLogNotificationReceived_withProductId() {
+    MessagingAnalytics.setDeliveryMetricsExportToBigQuery(true);
+    FakeFirelogTransport<MessagingClientEventExtension> transport = new FakeFirelogTransport<>();
+    FirebaseMessaging.transportFactory = () -> new FakeFirelogTransportFactory(transport);
+
+    Bundle b = new Bundle();
+    b.putString(MessagePayloadKeys.TTL, "22223");
+    b.putString(MessagePayloadKeys.TO, "some_installation_id");
+    b.putString(MessagePayloadKeys.FROM, "/topics/my cool topic");
+    b.putString(MessageNotificationKeys.ENABLE_NOTIFICATION, "1");
+    b.putString(MessagePayloadKeys.MSGID, "an id!!!");
+    b.putString(MessagePayloadKeys.DELIVERED_PRIORITY, "high");
+    b.putString(MessagePayloadKeys.SENDER_ID, "100101010");
+    b.putString(AnalyticsKeys.COMPOSER_LABEL, "composer label!");
+    b.putString(AnalyticsKeys.MESSAGE_LABEL, "message label!");
+    b.putString(MessagePayloadKeys.COLLAPSE_KEY, "collapse key");
+    b.putInt(MessagePayloadKeys.PRODUCT_ID, 12345);
+    Intent intent = new Intent().putExtras(b);
+    MessagingAnalytics.logNotificationReceived(intent);
+
+    Event<MessagingClientEventExtension> event = transport.eventQueue.poll();
+    MessagingClientEventExtension gotEvent = event.getPayload();
+    MessagingClientEventExtension wantEvent =
+        MessagingClientEventExtension.newBuilder()
+            .setMessagingClientEvent(
+                MessagingAnalytics.eventToProto(
+                    MessagingClientEvent.Event.MESSAGE_DELIVERED, intent))
+            .build();
+    assertThat(gotEvent.toByteArray()).isEqualTo(wantEvent.toByteArray());
+    assertThat(event.getProductData()).isNotNull();
+    assertThat(event.getProductData().getProductId()).isEqualTo(12345);
   }
 
   @Test
   public void testLogNotificationReceived_bigQueryExportDisabled() throws Exception {
     MessagingAnalytics.setDeliveryMetricsExportToBigQuery(false);
     FakeFirelogTransport<MessagingClientEventExtension> transport = new FakeFirelogTransport<>();
-    FirebaseMessaging.transportFactory = new FakeFirelogTransportFactory(transport);
+    FirebaseMessaging.transportFactory = () -> new FakeFirelogTransportFactory(transport);
 
     Bundle b = new Bundle();
     b.putString(MessagePayloadKeys.TTL, "22223");

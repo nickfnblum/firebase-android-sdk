@@ -14,19 +14,23 @@
 
 plugins {
     id 'firebase-library'
-    id 'kotlin-android'
+    id("kotlin-android")
 }
 
+group = "com.google.firebase"
+
 firebaseLibrary {
-    releaseWith project(':firebase-storage')
-    publishJavadoc = true
+    libraryGroup "storage"
+    publishJavadoc = false
+    publishReleaseNotes = false
     publishSources = true
 }
 
 android {
-    compileSdkVersion project.targetSdkVersion
+    namespace "com.google.firebase.storage.ktx"    
+    compileSdkVersion project.compileSdkVersion
     defaultConfig {
-        minSdkVersion 16
+        minSdkVersion project.minSdkVersion
         multiDexEnabled true
         targetSdkVersion project.targetSdkVersion
         versionName version
@@ -53,22 +57,19 @@ android {
 }
 
 dependencies {
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlinVersion"
+    api(project(":firebase-storage"))
+    api("com.google.firebase:firebase-common:21.0.0")
+    api("com.google.firebase:firebase-common-ktx:21.0.0")
 
-    implementation project(':firebase-common')
-    implementation project(':firebase-components')
-    implementation project(':firebase-common:ktx')
-    implementation project(':firebase-storage')
-    implementation 'androidx.annotation:annotation:1.1.0'
-    implementation 'com.google.android.gms:play-services-tasks:18.0.1'
+    implementation("com.google.firebase:firebase-components:18.0.0")
 
-    androidTestImplementation 'junit:junit:4.12'
-    androidTestImplementation "com.google.truth:truth:$googleTruthVersion"
-    androidTestImplementation 'androidx.test:runner:1.2.0'
-
-    testImplementation "org.robolectric:robolectric:$robolectricVersion"
-    testImplementation 'junit:junit:4.12'
+    testImplementation "androidx.test:core:$androidxTestCoreVersion"
     testImplementation "com.google.truth:truth:$googleTruthVersion"
+    testImplementation 'junit:junit:4.12'
     testImplementation 'org.mockito:mockito-core:3.3.3'
-    testImplementation 'androidx.test:core:1.2.0'
+    testImplementation "org.robolectric:robolectric:$robolectricVersion"
+
+    androidTestImplementation 'androidx.test:runner:1.2.0'
+    androidTestImplementation "com.google.truth:truth:$googleTruthVersion"
+    androidTestImplementation 'junit:junit:4.12'
 }

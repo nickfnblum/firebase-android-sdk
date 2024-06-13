@@ -27,7 +27,7 @@ import android.os.PowerManager;
 import android.os.PowerManager.WakeLock;
 import android.util.Log;
 import androidx.annotation.Nullable;
-import com.google.android.gms.common.util.VisibleForTesting;
+import androidx.annotation.VisibleForTesting;
 import com.google.android.gms.common.util.concurrent.NamedThreadFactory;
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
@@ -44,6 +44,8 @@ class SyncTask implements Runnable {
   private final FirebaseMessaging firebaseMessaging;
 
   @VisibleForTesting
+  // TODO(b/258424124): Migrate to go/firebase-android-executors
+  @SuppressLint("ThreadPoolCreation")
   ExecutorService processorExecutor =
       new ThreadPoolExecutor(
           /* corePoolSize= */ 0,

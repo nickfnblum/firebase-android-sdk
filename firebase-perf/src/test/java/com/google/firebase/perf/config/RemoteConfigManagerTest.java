@@ -25,9 +25,9 @@ import static org.mockito.MockitoAnnotations.initMocks;
 import androidx.annotation.NonNull;
 import com.google.android.gms.tasks.Task;
 import com.google.android.gms.tasks.TaskCompletionSource;
+import com.google.common.util.concurrent.MoreExecutors;
 import com.google.firebase.inject.Provider;
 import com.google.firebase.perf.FirebasePerformanceTestBase;
-import com.google.firebase.perf.provider.FirebasePerfProvider;
 import com.google.firebase.remoteconfig.FirebaseRemoteConfig;
 import com.google.firebase.remoteconfig.FirebaseRemoteConfigInfo;
 import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings;
@@ -48,11 +48,16 @@ import org.robolectric.RobolectricTestRunner;
 public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
 
   private static final String FIREPERF_FRC_NAMESPACE_NAME = "fireperf";
+  private static final FirebaseRemoteConfigValue TRUE_VALUE =
+      new RemoteConfigValueImplForTest("true");
+  private static final FirebaseRemoteConfigValue FALSE_VALUE =
+      new RemoteConfigValueImplForTest("false");
 
   @Mock private FirebaseRemoteConfig mockFirebaseRemoteConfig;
   @Mock private RemoteConfigComponent mockFirebaseRemoteConfigComponent;
   @Mock private Provider<RemoteConfigComponent> mockFirebaseRemoteConfigProvider;
 
+  private DeviceCacheManager cacheManager;
   private FakeScheduledExecutorService fakeExecutor;
 
   @Before
@@ -60,6 +65,8 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
     initMocks(this);
 
     fakeExecutor = new FakeScheduledExecutorService();
+    // DeviceCacheManager initialization requires immediate blocking task execution in its executor
+    cacheManager = new DeviceCacheManager(MoreExecutors.newDirectExecutorService());
 
     when(mockFirebaseRemoteConfigProvider.get()).thenReturn(mockFirebaseRemoteConfigComponent);
     when(mockFirebaseRemoteConfigComponent.get(FIREPERF_FRC_NAMESPACE_NAME))
@@ -78,24 +85,24 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
   // region Tests that verify output of valid/invalid Firebase Remote Config values.
 
   @Test
-  public void getFloat_keyIsNull_returnsEmpty() {
+  public void getDouble_keyIsNull_returnsEmpty() {
     RemoteConfigManager testRemoteConfigManager =
         setupTestRemoteConfigManager(createDefaultRcConfigMap());
 
-    assertThat(testRemoteConfigManager.getFloat(null).isAvailable()).isFalse();
+    assertThat(testRemoteConfigManager.getDouble(null).isAvailable()).isFalse();
   }
 
   @Test
-  public void getFloat_invalidFrcType_returnsEmpty() {
+  public void getDouble_invalidFrcType_returnsEmpty() {
     Map<String, FirebaseRemoteConfigValue> configs = createDefaultRcConfigMap();
     configs.put("some_key", new RemoteConfigValueImplForTest(/* throwsException= */ true));
     RemoteConfigManager testRemoteConfigManager = setupTestRemoteConfigManager(configs);
 
-    assertThat(testRemoteConfigManager.getFloat("some_key").isAvailable()).isFalse();
+    assertThat(testRemoteConfigManager.getDouble("some_key").isAvailable()).isFalse();
   }
 
   @Test
-  public void getFloat_validFrcValue_returnsValue() {
+  public void getDouble_validFrcValue_returnsValue() {
     Map<String, FirebaseRemoteConfigValue> configs = createDefaultRcConfigMap();
     configs.put("some_key1", new RemoteConfigValueImplForTest("100.0f"));
     configs.put("some_key2", new RemoteConfigValueImplForTest("1.0f"));
@@ -105,12 +112,12 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
     configs.put("some_key6", new RemoteConfigValueImplForTest("0.01f"));
     RemoteConfigManager testRemoteConfigManager = setupTestRemoteConfigManager(configs);
 
-    assertThat(testRemoteConfigManager.getFloat("some_key1").get()).isEqualTo(100.0f);
-    assertThat(testRemoteConfigManager.getFloat("some_key2").get()).isEqualTo(1.0f);
-    assertThat(testRemoteConfigManager.getFloat("some_key3").get()).isEqualTo(0.0f);
-    assertThat(testRemoteConfigManager.getFloat("some_key4").get()).isEqualTo(0.001f);
-    assertThat(testRemoteConfigManager.getFloat("some_key5").get()).isEqualTo(0.123f);
-    assertThat(testRemoteConfigManager.getFloat("some_key6").get()).isEqualTo(0.01f);
+    assertThat(testRemoteConfigManager.getDouble("some_key1").get()).isEqualTo(100.0);
+    assertThat(testRemoteConfigManager.getDouble("some_key2").get()).isEqualTo(1.0);
+    assertThat(testRemoteConfigManager.getDouble("some_key3").get()).isEqualTo(0.0);
+    assertThat(testRemoteConfigManager.getDouble("some_key4").get()).isEqualTo(0.001);
+    assertThat(testRemoteConfigManager.getDouble("some_key5").get()).isEqualTo(0.123);
+    assertThat(testRemoteConfigManager.getDouble("some_key6").get()).isEqualTo(0.01);
   }
 
   @Test
@@ -231,6 +238,29 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
   }
 
   @Test
+  public void syncConfigValues_savesNewlyFetchedValueToDeviceCache() {
+    Map<String, FirebaseRemoteConfigValue> configs = new HashMap<>();
+    ConfigurationConstants.ExperimentTTID flag =
+        ConfigurationConstants.ExperimentTTID.getInstance();
+    configs.put(flag.getRemoteConfigFlag(), TRUE_VALUE);
+    RemoteConfigManager testRemoteConfigManager = setupTestRemoteConfigManager(configs);
+
+    assertThat(cacheManager.getBoolean(flag.getDeviceCacheFlag()).isAvailable()).isFalse();
+
+    configs.put(flag.getRemoteConfigFlag(), FALSE_VALUE);
+    testRemoteConfigManager.syncConfigValues(configs);
+
+    assertThat(cacheManager.getBoolean(flag.getDeviceCacheFlag()).isAvailable()).isTrue();
+    assertThat(cacheManager.getBoolean(flag.getDeviceCacheFlag()).get()).isFalse();
+
+    configs.put(flag.getRemoteConfigFlag(), TRUE_VALUE);
+    testRemoteConfigManager.syncConfigValues(configs);
+
+    assertThat(cacheManager.getBoolean(flag.getDeviceCacheFlag()).isAvailable()).isTrue();
+    assertThat(cacheManager.getBoolean(flag.getDeviceCacheFlag()).get()).isTrue();
+  }
+
+  @Test
   public void getRemoteConfigValueOrDefaultLong_invalidFrcValue_returnsDefaultValue() {
     Map<String, FirebaseRemoteConfigValue> configs = createDefaultRcConfigMap();
     configs.put("some_key", new RemoteConfigValueImplForTest(/* throwsException= */ true));
@@ -241,15 +271,15 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
   }
 
   @Test
-  public void getRemoteConfigValueOrDefaultFloat_invalidFrcValue_returnsDefaultValue() {
+  public void getRemoteConfigValueOrDefaultDouble_invalidFrcValue_returnsDefaultValue() {
     Map<String, FirebaseRemoteConfigValue> configs = createDefaultRcConfigMap();
     configs.put("some_key", new RemoteConfigValueImplForTest(/* throwsException= */ true));
     RemoteConfigManager testRemoteConfigManager = setupTestRemoteConfigManager(configs);
 
-    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0f))
-        .isEqualTo(5.0f);
-    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 7.0f))
-        .isEqualTo(7.0f);
+    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0))
+        .isEqualTo(5.0);
+    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 7.0))
+        .isEqualTo(7.0);
   }
 
   @Test
@@ -271,13 +301,13 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
   }
 
   @Test
-  public void getRemoteConfigValueOrDefaultFloat_nullFrc_returnsDefaultValue() {
+  public void getRemoteConfigValueOrDefaultDouble_nullFrc_returnsDefaultValue() {
     RemoteConfigManager testRemoteConfigManager =
         setupRemoteConfigManagerWithUninitializedFirebaseRemoteConfigAndFirebaseApp(
             createDefaultRcConfigMap());
 
-    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0f))
-        .isEqualTo(5.0f);
+    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0))
+        .isEqualTo(5.0);
   }
 
   @Test
@@ -314,15 +344,15 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
   }
 
   @Test
-  public void getRemoteConfigValueOrDefaultFloat_frcInjectedAfterInit_returnsFrcValue() {
+  public void getRemoteConfigValueOrDefaultDouble_frcInjectedAfterInit_returnsFrcValue() {
     Map<String, FirebaseRemoteConfigValue> configs = createDefaultRcConfigMap();
     RemoteConfigManager testRemoteConfigManager =
         setupRemoteConfigManagerWithUninitializedFirebaseRemoteConfigAndFirebaseApp(configs);
-    configs.put("some_key", new RemoteConfigValueImplForTest("25.0f"));
+    configs.put("some_key", new RemoteConfigValueImplForTest("25.0"));
     testRemoteConfigManager.setFirebaseRemoteConfigProvider(mockFirebaseRemoteConfigProvider);
 
-    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0f))
-        .isEqualTo(25.0f);
+    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0))
+        .isEqualTo(25.0);
   }
 
   @Test
@@ -362,13 +392,13 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
   }
 
   @Test
-  public void getRemoteConfigValueOrDefaultFloat_frcValueSourceIsRemote_returnsFrcValue() {
+  public void getRemoteConfigValueOrDefaultDouble_frcValueSourceIsRemote_returnsFrcValue() {
     Map<String, FirebaseRemoteConfigValue> configs = createDefaultRcConfigMap();
-    configs.put("some_key", new RemoteConfigValueImplForTest("4.0f"));
+    configs.put("some_key", new RemoteConfigValueImplForTest("4.0"));
     RemoteConfigManager testRemoteConfigManager = setupTestRemoteConfigManager(configs);
 
-    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0f))
-        .isEqualTo(4.0f);
+    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0))
+        .isEqualTo(4.0);
   }
 
   @Test
@@ -427,25 +457,25 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
   }
 
   @Test
-  public void getRemoteConfigValueOrDefaultFloat_frcValueSourceIsNotRemote_returnsDefaultValue() {
+  public void getRemoteConfigValueOrDefaultDouble_frcValueSourceIsNotRemote_returnsDefaultValue() {
     Map<String, FirebaseRemoteConfigValue> configs = createDefaultRcConfigMap();
     RemoteConfigManager testRemoteConfigManager = setupTestRemoteConfigManager(configs);
 
     // Pass 1: Test with VALUE_SOURCE_DEFAULT
     configs.put(
         "some_key",
-        new RemoteConfigValueImplForTest("4.0f", FirebaseRemoteConfig.VALUE_SOURCE_DEFAULT));
+        new RemoteConfigValueImplForTest("4.0", FirebaseRemoteConfig.VALUE_SOURCE_DEFAULT));
 
-    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0f))
-        .isEqualTo(5.0f);
+    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0))
+        .isEqualTo(5.0);
 
     // Pass 2: Test with VALUE_SOURCE_STATIC
     configs.put(
         "some_key",
-        new RemoteConfigValueImplForTest("4.0f", FirebaseRemoteConfig.VALUE_SOURCE_STATIC));
+        new RemoteConfigValueImplForTest("4.0", FirebaseRemoteConfig.VALUE_SOURCE_STATIC));
 
-    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0f))
-        .isEqualTo(5.0f);
+    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0))
+        .isEqualTo(5.0);
   }
 
   @Test
@@ -543,8 +573,8 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
   }
 
   @Test
-  public void getRemoteConfigValueOrDefaultFloat_triggersRcFetchOnceAndOnlyOnce() {
-    verifyRcTriggersFetchOnceAndOnlyOnceFor(5.0f);
+  public void getRemoteConfigValueOrDefaultDouble_triggersRcFetchOnceAndOnlyOnce() {
+    verifyRcTriggersFetchOnceAndOnlyOnceFor(5.0);
   }
 
   @Test
@@ -591,8 +621,8 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
   }
 
   @Test
-  public void getRemoteConfigValueOrDefaultFloat_triggersOneRcFetchIfPreviousFetchWasTooLongAgo() {
-    verifyRcTriggersOneFetchIfPreviousFetchWasTooLongAgoFor(5.0f);
+  public void getRemoteConfigValueOrDefaultDouble_triggersOneRcFetchIfPreviousFetchWasTooLongAgo() {
+    verifyRcTriggersOneFetchIfPreviousFetchWasTooLongAgoFor(5.0);
   }
 
   @Test
@@ -666,25 +696,25 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
   }
 
   @Test
-  public void getRemoteConfigValueOrDefaultFloat_scalesFrcValue() {
+  public void getRemoteConfigValueOrDefaultDouble_scalesFrcValue() {
     Map<String, FirebaseRemoteConfigValue> configs = createDefaultRcConfigMap();
-    configs.put("some_key", new RemoteConfigValueImplForTest("0.5f"));
+    configs.put("some_key", new RemoteConfigValueImplForTest("0.5"));
     RemoteConfigManager testRemoteConfigManager = setupTestRemoteConfigManager(configs);
 
-    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0f))
-        .isEqualTo(0.5f);
+    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0))
+        .isEqualTo(0.5);
   }
 
   @Test
-  public void getRemoteConfigValueOrDefaultFloat_scalesVerySmallFrcValue() {
+  public void getRemoteConfigValueOrDefaultDouble_scalesVerySmallFrcValue() {
     Map<String, FirebaseRemoteConfigValue> configs = createDefaultRcConfigMap();
-    configs.put("some_key", new RemoteConfigValueImplForTest("0.000005f"));
+    configs.put("some_key", new RemoteConfigValueImplForTest("0.000005"));
     RemoteConfigManager testRemoteConfigManager = setupTestRemoteConfigManager(configs);
 
-    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0f))
-        .isAtMost(0.000005f);
-    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0f))
-        .isAtLeast(0.0000049f);
+    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0))
+        .isAtMost(0.000005);
+    assertThat(testRemoteConfigManager.getRemoteConfigValueOrDefault("some_key", 5.0))
+        .isAtLeast(0.0000049);
   }
 
   @Test
@@ -693,8 +723,8 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
   }
 
   @Test
-  public void getRemoteConfigValueOrDefaultFloat_allowsRefetchOnFailure() {
-    verifyRcAllowsRefetchOnFailureFor(5.0f);
+  public void getRemoteConfigValueOrDefaultDouble_allowsRefetchOnFailure() {
+    verifyRcAllowsRefetchOnFailureFor(5.0);
   }
 
   @Test
@@ -782,7 +812,16 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
   }
 
   @Test
-  public void isLastFetchFailed_frcIsNonNullAndStatusOtherThanFailed_returnsFalse() {
+  public void isLastFetchFailed_frcIsNonNullAndStatusThrottled_returnsTrue() {
+    RemoteConfigManager testRemoteConfigManager =
+        setupTestRemoteConfigManager(createDefaultRcConfigMap());
+    simulateFirebaseRemoteConfigLastFetchStatus(FirebaseRemoteConfig.LAST_FETCH_STATUS_THROTTLED);
+
+    assertThat(testRemoteConfigManager.isLastFetchFailed()).isTrue();
+  }
+
+  @Test
+  public void isLastFetchFailed_frcIsNonNullAndStatusOtherThanFailedOrThrottled_returnsFalse() {
     RemoteConfigManager testRemoteConfigManager =
         setupTestRemoteConfigManager(createDefaultRcConfigMap());
 
@@ -791,9 +830,6 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
     assertThat(testRemoteConfigManager.isLastFetchFailed()).isFalse();
 
     simulateFirebaseRemoteConfigLastFetchStatus(FirebaseRemoteConfig.LAST_FETCH_STATUS_SUCCESS);
-    assertThat(testRemoteConfigManager.isLastFetchFailed()).isFalse();
-
-    simulateFirebaseRemoteConfigLastFetchStatus(FirebaseRemoteConfig.LAST_FETCH_STATUS_THROTTLED);
     assertThat(testRemoteConfigManager.isLastFetchFailed()).isFalse();
   }
 
@@ -809,15 +845,14 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
                 appStartConfigFetchDelay));
 
     // Simulate time fast forward to some time before fetch time is up
-    long appStartTimeInMs =
-        TimeUnit.MICROSECONDS.toMillis(FirebasePerfProvider.getAppStartTime().getMicros());
+    long appStartTimeInMs = System.currentTimeMillis();
     when(remoteConfigManagerPartialMock.getCurrentSystemTimeMillis())
         .thenReturn(appStartTimeInMs + appStartConfigFetchDelay - 2000);
 
     simulateFirebaseRemoteConfigLastFetchStatus(
         FirebaseRemoteConfig.LAST_FETCH_STATUS_NO_FETCH_YET);
     remoteConfigManagerPartialMock.getRemoteConfigValueOrDefault("some_key", 5L);
-    remoteConfigManagerPartialMock.getRemoteConfigValueOrDefault("some_other_key", 5.0f);
+    remoteConfigManagerPartialMock.getRemoteConfigValueOrDefault("some_other_key", 5.0);
     remoteConfigManagerPartialMock.getRemoteConfigValueOrDefault("some_other_key_2", true);
     remoteConfigManagerPartialMock.getRemoteConfigValueOrDefault("some_other_key_3", "1.0.0");
 
@@ -836,8 +871,7 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
                 appStartConfigFetchDelay));
 
     // Simulate time fast forward to 2s after fetch delay time is up
-    long appStartTimeInMs =
-        TimeUnit.MICROSECONDS.toMillis(FirebasePerfProvider.getAppStartTime().getMicros());
+    long appStartTimeInMs = System.currentTimeMillis();
     when(remoteConfigManagerPartialMock.getCurrentSystemTimeMillis())
         .thenReturn(appStartTimeInMs + appStartConfigFetchDelay + 2000);
 
@@ -889,10 +923,18 @@ public final class RemoteConfigManagerTest extends FirebasePerformanceTestBase {
     when(mockFirebaseRemoteConfig.getAll()).thenReturn(configs);
     if (initializeFrc) {
       return new RemoteConfigManager(
-          fakeExecutor, mockFirebaseRemoteConfig, appStartConfigFetchDelayInMs);
+          cacheManager,
+          fakeExecutor,
+          mockFirebaseRemoteConfig,
+          appStartConfigFetchDelayInMs,
+          RemoteConfigManager.getInitialStartupMillis());
     } else {
       return new RemoteConfigManager(
-          fakeExecutor, /* firebaseRemoteConfig= */ null, appStartConfigFetchDelayInMs);
+          cacheManager,
+          fakeExecutor,
+          /* firebaseRemoteConfig= */ null,
+          appStartConfigFetchDelayInMs,
+          RemoteConfigManager.getInitialStartupMillis());
     }
   }
 

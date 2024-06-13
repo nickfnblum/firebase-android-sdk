@@ -25,7 +25,7 @@ import com.google.firebase.FirebaseApp;
 import com.google.firebase.FirebaseOptions;
 import com.google.firebase.appcheck.AppCheckTokenResult;
 import com.google.firebase.appcheck.interop.AppCheckTokenListener;
-import com.google.firebase.appcheck.interop.InternalAppCheckTokenProvider;
+import com.google.firebase.appcheck.interop.InteropAppCheckTokenProvider;
 import com.google.firebase.auth.internal.InternalAuthProvider;
 import com.google.firebase.emulators.EmulatedServiceSettings;
 import com.google.firebase.inject.Provider;
@@ -50,9 +50,10 @@ public class FirebaseStorage {
       "The storage Uri cannot contain a path element.";
   @NonNull private final FirebaseApp mApp;
   @Nullable private final Provider<InternalAuthProvider> mAuthProvider;
-  @Nullable private final Provider<InternalAppCheckTokenProvider> mAppCheckProvider;
+  @Nullable private final Provider<InteropAppCheckTokenProvider> mAppCheckProvider;
   @Nullable private final String mBucketName;
   private long sMaxUploadRetry = 10 * DateUtils.MINUTE_IN_MILLIS; //  10 * 60 * 1000
+  private long sMaxChunkUploadRetry = DateUtils.MINUTE_IN_MILLIS; //  60 * 1000
   private long sMaxDownloadRetry = 10 * DateUtils.MINUTE_IN_MILLIS; //  10 * 60 * 1000
   private long sMaxQueryRetry = 2 * DateUtils.MINUTE_IN_MILLIS; //  2 * 60 * 1000
 
@@ -62,7 +63,7 @@ public class FirebaseStorage {
       @Nullable String bucketName,
       @NonNull FirebaseApp app,
       @Nullable Provider<InternalAuthProvider> authProvider,
-      @Nullable Provider<InternalAppCheckTokenProvider> appCheckProvider) {
+      @Nullable Provider<InteropAppCheckTokenProvider> appCheckProvider) {
     mBucketName = bucketName;
     mApp = app;
     mAuthProvider = authProvider;
@@ -227,6 +228,25 @@ public class FirebaseStorage {
   }
 
   /**
+   * Returns the maximum time to retry sending a chunk if a failure occurs
+   *
+   * @return maximum time in milliseconds. Defaults to 1 minute.
+   */
+  public long getMaxChunkUploadRetry() {
+    return sMaxChunkUploadRetry;
+  }
+
+  /**
+   * Sets the maximum time to retry sending a chunk if a failure occurs
+   *
+   * @param maxChunkRetryMillis the maximum time in milliseconds. Defaults to 1 minute (60,000
+   *     milliseconds).
+   */
+  public void setMaxChunkUploadRetry(long maxChunkRetryMillis) {
+    sMaxChunkUploadRetry = maxChunkRetryMillis;
+  }
+
+  /**
    * Returns the maximum time to retry operations other than upload and download if a failure
    * occurs.
    *
@@ -343,7 +363,7 @@ public class FirebaseStorage {
   }
 
   @Nullable
-  InternalAppCheckTokenProvider getAppCheckProvider() {
+  InteropAppCheckTokenProvider getAppCheckProvider() {
     return mAppCheckProvider != null ? mAppCheckProvider.get() : null;
   }
 

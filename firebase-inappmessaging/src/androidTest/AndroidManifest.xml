@@ -1,10 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    package="com.google.firebase.inappmessaging">
+    xmlns:tools="http://schemas.android.com/tools">
 
   <uses-sdk
-      android:minSdkVersion="16"
-      android:targetSdkVersion="23"/>
+      android:minSdkVersion="21"
+      android:targetSdkVersion="33"/>
   <uses-permission android:name="android.permission.INTERNET"/>
   <application>
     <uses-library android:name="android.test.runner"/>
@@ -14,8 +13,4 @@
               android:value="com.google.firebase.components.ComponentRegistrar" />
     </service>
   </application>
-
-  <instrumentation
-      android:name="androidx.test.runner.AndroidJUnitRunner"
-      android:targetPackage="com.google.firebase.inappmessaging"/>
 </manifest>

@@ -20,7 +20,8 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 
 import android.content.Context;
 import androidx.annotation.NonNull;
-import com.google.android.gms.common.util.VisibleForTesting;
+import androidx.annotation.VisibleForTesting;
+
 import com.google.firebase.perf.config.ConfigResolver;
 import com.google.firebase.perf.logging.AndroidLogger;
 import com.google.firebase.perf.metrics.resource.ResourceType;
@@ -46,10 +47,10 @@ final class RateLimiter {
 
   /** Gets the sampling and rate limiting configs. */
   private final ConfigResolver configResolver;
-  /** The app's bucket ID for sampling, a number in [0.0f, 1.0f). */
-  private final float samplingBucketId;
+  /** The app's bucket ID for sampling, a number in [0.0, 1.0). */
+  private final double samplingBucketId;
 
-  private final float fragmentBucketId;
+  private final double fragmentBucketId;
 
   private RateLimiterImpl traceLimiter = null;
   private RateLimiterImpl networkLimiter = null;
@@ -77,23 +78,23 @@ final class RateLimiter {
 
   /** Generates a bucket id between [0.0f, 1.0f) for sampling, it is sticky across app lifecycle. */
   @VisibleForTesting
-  static float getSamplingBucketId() {
-    return new Random().nextFloat();
+  static double getSamplingBucketId() {
+    return new Random().nextDouble();
   }
 
   RateLimiter(
       final Rate rate,
       final long capacity,
       final Clock clock,
-      float samplingBucketId,
-      float fragmentBucketId,
+      double samplingBucketId,
+      double fragmentBucketId,
       ConfigResolver configResolver) {
     Utils.checkArgument(
-        0.0f <= samplingBucketId && samplingBucketId < 1.0f,
-        "Sampling bucket ID should be in range [0.0f, 1.0f).");
+        0.0 <= samplingBucketId && samplingBucketId < 1.0,
+        "Sampling bucket ID should be in range [0.0, 1.0).");
     Utils.checkArgument(
-        0.0f <= fragmentBucketId && fragmentBucketId < 1.0f,
-        "Fragment sampling bucket ID should be in range [0.0f, 1.0f).");
+        0.0 <= fragmentBucketId && fragmentBucketId < 1.0,
+        "Fragment sampling bucket ID should be in range [0.0, 1.0).");
     this.samplingBucketId = samplingBucketId;
     this.fragmentBucketId = fragmentBucketId;
     this.configResolver = configResolver;
@@ -107,13 +108,13 @@ final class RateLimiter {
 
   /** Returns whether device is allowed to send trace events based on trace sampling rate. */
   private boolean isDeviceAllowedToSendTraces() {
-    float validTraceSamplingBucketIdThreshold = configResolver.getTraceSamplingRate();
+    double validTraceSamplingBucketIdThreshold = configResolver.getTraceSamplingRate();
     return samplingBucketId < validTraceSamplingBucketIdThreshold;
   }
 
   /** Returns whether device is allowed to send network events based on network sampling rate. */
   private boolean isDeviceAllowedToSendNetworkEvents() {
-    float validNetworkSamplingBucketIdThreshold = configResolver.getNetworkRequestSamplingRate();
+    double validNetworkSamplingBucketIdThreshold = configResolver.getNetworkRequestSamplingRate();
     return samplingBucketId < validNetworkSamplingBucketIdThreshold;
   }
 
@@ -122,7 +123,7 @@ final class RateLimiter {
    * trace sampling rate.
    */
   private boolean isDeviceAllowedToSendFragmentScreenTraces() {
-    float validFragmentSamplingBucketIdThreshold = configResolver.getFragmentSamplingRate();
+    double validFragmentSamplingBucketIdThreshold = configResolver.getFragmentSamplingRate();
     return fragmentBucketId < validFragmentSamplingBucketIdThreshold;
   }
 
@@ -264,7 +265,7 @@ final class RateLimiter {
     // Token bucket capacity, also the initial number of tokens in the bucket.
     private long capacity;
     // Number of tokens in the bucket.
-    private long tokenCount;
+    private double tokenCount;
 
     private Rate foregroundRate;
     private Rate backgroundRate;
@@ -298,22 +299,16 @@ final class RateLimiter {
      */
     synchronized boolean check(@NonNull PerfMetric metric) {
       Timer now = clock.getTime();
-      long newTokens =
-          Math.max(
-              0,
-              (long)
-                  (lastTimeTokenReplenished.getDurationMicros(now)
-                      * rate.getTokensPerSeconds()
-                      / MICROS_IN_A_SECOND));
-      tokenCount = Math.min(tokenCount + newTokens, capacity);
-      if (newTokens > 0) {
-        lastTimeTokenReplenished =
-            new Timer(
-                lastTimeTokenReplenished.getMicros()
-                    + (long) (newTokens * MICROS_IN_A_SECOND / rate.getTokensPerSeconds()));
+      double newTokens =
+          (lastTimeTokenReplenished.getDurationMicros(now)
+              * rate.getTokensPerSeconds()
+              / MICROS_IN_A_SECOND);
+      if (newTokens > 0.0) {
+        tokenCount = Math.min(tokenCount + newTokens, capacity);
+        lastTimeTokenReplenished = now;
       }
-      if (tokenCount > 0) {
-        tokenCount--;
+      if (tokenCount >= 1.0) {
+        tokenCount -= 1.0;
         return true;
       }
       if (isLogcatEnabled) {

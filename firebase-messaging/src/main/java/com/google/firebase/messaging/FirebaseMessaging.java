@@ -42,6 +42,7 @@ import com.google.android.gms.tasks.TaskCompletionSource;
 import com.google.android.gms.tasks.Tasks;
 import com.google.firebase.DataCollectionDefaultChange;
 import com.google.firebase.FirebaseApp;
+import com.google.firebase.analytics.connector.AnalyticsConnector;
 import com.google.firebase.events.EventHandler;
 import com.google.firebase.events.Subscriber;
 import com.google.firebase.heartbeatinfo.HeartBeatInfo;
@@ -62,20 +63,9 @@ import java.util.concurrent.TimeUnit;
  * Messaging</a> singleton that provides methods for subscribing to topics and sending upstream
  * messages.
  *
- * <p>In order to receive Firebase messages, declare an implementation of {@link
- * FirebaseMessagingService} in the app manifest. To process messages, override base class methods
- * to handle any events required by the application.
- *
- * <p>Client apps can send <a
- * href="https://firebase.google.com/docs/cloud-messaging/android/upstream">upstream messages</a>
- * back to the app server using the XMPP-based Cloud Connection Server. For example:
- *
- * <pre>
- * FirebaseMessaging.getInstance().send(
- *     new RemoteMessage.Builder(SENDER_ID + "&#64;fcm.googleapis.com")
- *     .setMessageId(id)
- *     .addData("key", "value")
- *     .build());</pre>
+ * <p>In order to receive messages, declare an implementation of <br>
+ * {@link FirebaseMessagingService} in the app manifest. To process messages, override base class
+ * methods to handle any events required by the application.
  */
 public class FirebaseMessaging {
 
@@ -106,13 +96,11 @@ public class FirebaseMessaging {
 
   private final FirebaseApp firebaseApp;
   @Nullable private final FirebaseInstanceIdInternal iid;
-  private final FirebaseInstallationsApi fis;
   private final Context context;
   private final GmsRpc gmsRpc;
   private final RequestDeduplicator requestDeduplicator;
   private final AutoInit autoInit;
   private final Executor initExecutor;
-  private final Executor taskExecutor;
   private final Executor fileExecutor;
   private final Task<TopicsSubscriber> topicsSubscriberTask;
   private final Metadata metadata;
@@ -122,11 +110,7 @@ public class FirebaseMessaging {
 
   private final Application.ActivityLifecycleCallbacks lifecycleCallbacks;
 
-  @Nullable
-  @SuppressLint(
-      "FirebaseUnknownNullness") // Checktest wasn't recognizing @Nullable nor @NonNull annotations.
-  @VisibleForTesting
-  static TransportFactory transportFactory;
+  @VisibleForTesting static Provider<TransportFactory> transportFactory = () -> null;
 
   @GuardedBy("FirebaseMessaging.class")
   @VisibleForTesting
@@ -165,7 +149,7 @@ public class FirebaseMessaging {
       Provider<UserAgentPublisher> userAgentPublisher,
       Provider<HeartBeatInfo> heartBeatInfo,
       FirebaseInstallationsApi firebaseInstallationsApi,
-      @Nullable TransportFactory transportFactory,
+      Provider<TransportFactory> transportFactory,
       Subscriber subscriber) {
     this(
         firebaseApp,
@@ -184,13 +168,12 @@ public class FirebaseMessaging {
       Provider<UserAgentPublisher> userAgentPublisher,
       Provider<HeartBeatInfo> heartBeatInfo,
       FirebaseInstallationsApi firebaseInstallationsApi,
-      @Nullable TransportFactory transportFactory,
+      Provider<TransportFactory> transportFactory,
       Subscriber subscriber,
       Metadata metadata) {
     this(
         firebaseApp,
         iid,
-        firebaseInstallationsApi,
         transportFactory,
         subscriber,
         metadata,
@@ -204,8 +187,7 @@ public class FirebaseMessaging {
   FirebaseMessaging(
       FirebaseApp firebaseApp,
       @Nullable FirebaseInstanceIdInternal iid,
-      FirebaseInstallationsApi firebaseInstallationsApi,
-      @Nullable TransportFactory transportFactory,
+      Provider<TransportFactory> transportFactory,
       Subscriber subscriber,
       Metadata metadata,
       GmsRpc gmsRpc,
@@ -217,12 +199,10 @@ public class FirebaseMessaging {
 
     this.firebaseApp = firebaseApp;
     this.iid = iid;
-    fis = firebaseInstallationsApi;
     autoInit = new AutoInit(subscriber);
     context = firebaseApp.getApplicationContext();
     this.lifecycleCallbacks = new FcmLifecycleCallbacks();
     this.metadata = metadata;
-    this.taskExecutor = taskExecutor;
     this.gmsRpc = gmsRpc;
     this.requestDeduplicator = new RequestDeduplicator(taskExecutor);
     this.initExecutor = initExecutor;
@@ -271,10 +251,49 @@ public class FirebaseMessaging {
           }
         });
 
-    initExecutor.execute(
-        () ->
-            // Initializes proxy notification support for the app.
-            ProxyNotificationInitializer.initialize(context));
+    initExecutor.execute(() -> initializeProxyNotifications());
+  }
+
+  private void initializeProxyNotifications() {
+    // Initializes proxy notification support for the app.
+    ProxyNotificationInitializer.initialize(context);
+    // Update proxy retention in case any settings or included libraries has changed.
+    ProxyNotificationPreferences.setProxyRetention(
+        context, gmsRpc, shouldRetainProxyNotifications());
+    if (shouldRetainProxyNotifications()) {
+      // Handle any retained proxy notifications.
+      handleProxiedNotificationData();
+    }
+  }
+
+  @SuppressWarnings("FirebaseUseExplicitDependencies")
+  private boolean shouldRetainProxyNotifications() {
+    ProxyNotificationInitializer.initialize(context);
+    if (!ProxyNotificationInitializer.isProxyNotificationEnabled(context)) {
+      // Proxy notifications not enabled, shouldn't retain.
+      return false;
+    }
+    if (firebaseApp.get(AnalyticsConnector.class) != null) {
+      // Google Analytics is present, should retain.
+      return true;
+    }
+    // Retain if BigQuery export is enabled and Firelog is present so that proxied notifications can
+    // be retrieved and logged to Firelog for BigQuery export on next startup after being displayed.
+    return MessagingAnalytics.deliveryMetricsExportToBigQueryEnabled() && transportFactory != null;
+  }
+
+  private void handleProxiedNotificationData() {
+    gmsRpc
+        .getProxyNotificationData()
+        .addOnSuccessListener(
+            initExecutor,
+            notification -> {
+              if (notification != null) {
+                // Proxied notification retrieved, log it and check if there's more.
+                MessagingAnalytics.logNotificationReceived(notification.getIntent());
+                handleProxiedNotificationData();
+              }
+            });
   }
 
   /**
@@ -335,6 +354,9 @@ public class FirebaseMessaging {
    */
   public void setDeliveryMetricsExportToBigQuery(boolean enable) {
     MessagingAnalytics.setDeliveryMetricsExportToBigQuery(enable);
+    // Update proxy retention since BigQuery export setting may have changed.
+    ProxyNotificationPreferences.setProxyRetention(
+        context, gmsRpc, shouldRetainProxyNotifications());
   }
 
   /**
@@ -367,8 +389,15 @@ public class FirebaseMessaging {
    * @param enable Whether to enable or disable notification delegation.
    * @return A Task that completes when the notification delegation has been set.
    */
+  @NonNull
   public Task<Void> setNotificationDelegationEnabled(boolean enable) {
-    return ProxyNotificationInitializer.setEnableProxyNotification(initExecutor, context, enable);
+    return ProxyNotificationInitializer.setEnableProxyNotification(initExecutor, context, enable)
+        .addOnSuccessListener(
+            Runnable::run,
+            listener ->
+                // Update proxy retention since proxy enabled state may have changed.
+                ProxyNotificationPreferences.setProxyRetention(
+                    context, gmsRpc, shouldRetainProxyNotifications()));
   }
 
   /**
@@ -446,7 +475,7 @@ public class FirebaseMessaging {
    * <p>The subscribe operation is persisted and will be retried until successful.
    *
    * <p>This uses an FCM registration token to identify the app instance, generating one if it does
-   * not exist (see {@link #getToken()}), which perodically sends data to the Firebase backend when
+   * not exist (see {@link #getToken()}), which periodically sends data to the Firebase backend when
    * auto-init is enabled. To delete the data, delete the token ({@link #deleteToken}) and the
    * Firebase Installations ID ({@code FirebaseInstallations.delete()}). To stop the periodic
    * sending of data, disable auto-init ({@link #setAutoInitEnabled}).
@@ -455,6 +484,8 @@ public class FirebaseMessaging {
    *     "[a-zA-Z0-9-_.~%]{1,900}".
    * @return A task that will be completed when the topic has been successfully subscribed to.
    */
+  // TODO(b/261013992): Use an explicit executor in continuations.
+  @SuppressLint("TaskMainThread")
   @NonNull
   public Task<Void> subscribeToTopic(@NonNull String topic) {
     return topicsSubscriberTask.onSuccessTask(
@@ -470,6 +501,8 @@ public class FirebaseMessaging {
    *     expression: "[a-zA-Z0-9-_.~%]{1,900}".
    * @return A task that will be completed when the topic has been successfully unsubscribed from.
    */
+  // TODO(b/261013992): Use an explicit executor in continuations.
+  @SuppressLint("TaskMainThread")
   @NonNull
   public Task<Void> unsubscribeFromTopic(@NonNull String topic) {
     return topicsSubscriberTask.onSuccessTask(
@@ -481,7 +514,12 @@ public class FirebaseMessaging {
    *
    * <p>When there is an active connection the message will be sent immediately, otherwise the
    * message will be queued up to the time to live (TTL) set in the message.
+   *
+   * @deprecated FCM upstream messaging is deprecated and will be decommissioned in June 2024. Learn
+   *     more in the <a href="https://firebase.google.com/support/faq#fcm-23-deprecation">FAQ about
+   *     FCM features deprecated in June 2023</a>.
    */
+  @Deprecated
   public void send(@NonNull RemoteMessage message) {
     if (TextUtils.isEmpty(message.getTo())) {
       throw new IllegalArgumentException("Missing 'to'");
@@ -517,12 +555,12 @@ public class FirebaseMessaging {
   /** @hide */
   @Nullable
   public static TransportFactory getTransportFactory() {
-    return transportFactory;
+    return transportFactory.get();
   }
 
   /** @hide */
   static void clearTransportFactoryForTest() {
-    transportFactory = null;
+    transportFactory = () -> null;
   }
 
   /** Checks if Gmscore is present. */
@@ -548,6 +586,8 @@ public class FirebaseMessaging {
   }
 
   @SuppressWarnings("FutureReturnValueIgnored")
+  // TODO(b/258424124): Migrate to go/firebase-android-executors
+  @SuppressLint("ThreadPoolCreation")
   void enqueueTaskWithDelaySeconds(Runnable task, long delaySeconds) {
     synchronized (FirebaseMessaging.class) {
       if (syncExecutor == null) {

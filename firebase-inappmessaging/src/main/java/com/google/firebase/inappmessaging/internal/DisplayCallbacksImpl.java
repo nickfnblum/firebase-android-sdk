@@ -15,7 +15,9 @@
 package com.google.firebase.inappmessaging.internal;
 
 import android.text.TextUtils;
-import com.google.android.gms.common.util.VisibleForTesting;
+
+import androidx.annotation.VisibleForTesting;
+
 import com.google.android.gms.tasks.Task;
 import com.google.android.gms.tasks.TaskCompletionSource;
 import com.google.firebase.inappmessaging.FirebaseInAppMessagingDisplayCallbacks;
@@ -42,7 +44,7 @@ public class DisplayCallbacksImpl implements FirebaseInAppMessagingDisplayCallba
   private final InAppMessage inAppMessage;
   private final String triggeringEvent;
 
-  private static boolean wasImpressed;
+  private boolean wasImpressed;
   private static final String MESSAGE_CLICK = "message click to metrics logger";
 
   @VisibleForTesting
@@ -70,6 +72,11 @@ public class DisplayCallbacksImpl implements FirebaseInAppMessagingDisplayCallba
 
     // just to be explicit
     wasImpressed = false;
+  }
+
+  @VisibleForTesting
+  boolean wasImpressed() {
+    return wasImpressed;
   }
 
   @Override

@@ -16,11 +16,13 @@ package com.google.firebase.firestore.core;
 
 import static com.google.firebase.firestore.util.Assert.hardAssert;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import androidx.annotation.Nullable;
 import com.google.android.gms.tasks.Task;
 import com.google.android.gms.tasks.TaskCompletionSource;
 import com.google.android.gms.tasks.Tasks;
+import com.google.firebase.firestore.AggregateField;
 import com.google.firebase.firestore.EventListener;
 import com.google.firebase.firestore.FirebaseFirestoreException;
 import com.google.firebase.firestore.FirebaseFirestoreException.Code;
@@ -49,8 +51,10 @@ import com.google.firebase.firestore.remote.RemoteStore;
 import com.google.firebase.firestore.util.AsyncQueue;
 import com.google.firebase.firestore.util.Function;
 import com.google.firebase.firestore.util.Logger;
+import com.google.firestore.v1.Value;
 import java.io.InputStream;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -188,6 +192,8 @@ public final class FirestoreClient {
     asyncQueue.enqueueAndForget(() -> eventManager.removeQueryListener(listener));
   }
 
+  // TODO(b/261013682): Use an explicit executor in continuations.
+  @SuppressLint("TaskMainThread")
   public Task<Document> getDocumentFromLocalCache(DocumentKey docKey) {
     this.verifyNotTerminated();
     return asyncQueue
@@ -235,6 +241,21 @@ public final class FirestoreClient {
     return AsyncQueue.callTask(
         asyncQueue.getExecutor(),
         () -> syncEngine.transaction(asyncQueue, options, updateFunction));
+  }
+
+  // TODO(b/261013682): Use an explicit executor in continuations.
+  @SuppressLint("TaskMainThread")
+  public Task<Map<String, Value>> runAggregateQuery(
+      Query query, List<AggregateField> aggregateFields) {
+    this.verifyNotTerminated();
+    final TaskCompletionSource<Map<String, Value>> result = new TaskCompletionSource<>();
+    asyncQueue.enqueueAndForget(
+        () ->
+            syncEngine
+                .runAggregateQuery(query, aggregateFields)
+                .addOnSuccessListener(data -> result.setResult(data))
+                .addOnFailureListener(e -> result.setException(e)));
+    return result.getTask();
   }
 
   /**
@@ -330,6 +351,16 @@ public final class FirestoreClient {
   public Task<Void> configureFieldIndexes(List<FieldIndex> fieldIndices) {
     verifyNotTerminated();
     return asyncQueue.enqueue(() -> localStore.configureFieldIndexes(fieldIndices));
+  }
+
+  public void setIndexAutoCreationEnabled(boolean isEnabled) {
+    verifyNotTerminated();
+    asyncQueue.enqueueAndForget(() -> localStore.setIndexAutoCreationEnabled(isEnabled));
+  }
+
+  public void deleteAllFieldIndexes() {
+    verifyNotTerminated();
+    asyncQueue.enqueueAndForget(() -> localStore.deleteAllFieldIndexes());
   }
 
   public void removeSnapshotsInSyncListener(EventListener<Void> listener) {
